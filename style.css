@@ -1,0 +1,4654 @@
+/* ============================================================
+   style.css — Central stylesheet for islaFIND
+   Covers: loading screen (index.php), the unified auth card
+   with sliding Login / Create Account panels (login.php),
+   and the dashboard (dashboard.php).
+   ============================================================ */
+
+/* ---------- Design tokens (Phase 2 palette) -----------------
+   Every color used across the app is defined once here, then
+   referenced as a CSS variable everywhere else. Change a token
+   here and the whole app re-themes instantly.
+     --primary:  Ocean Teal — primary actions, links, accents
+     --coral:    Coral Sunset — HIRE! / JOB DONE high-priority triggers
+     --bg:       Clean Off-White page background
+     --surface:  Crisp white card surfaces
+   ------------------------------------------------------------ */
+:root {
+    --primary:      #0077B6;  /* Ocean Teal (primary actions)      */
+    --primary-dark: #005f92;  /* Teal hover / gradient end         */
+    --primary-soft: #e6f2f9;  /* Light teal tint (active surfaces) */
+    --primary-glow: rgba(0, 119, 182, 0.25); /* soft teal shadow   */
+    --coral:        #FF6B6B;  /* Coral Sunset (HIRE! / JOB DONE)   */
+    --coral-dark:   #e8554d;  /* Coral hover shade                 */
+    --bg:           #F8F9FA;  /* Clean Off-White page background   */
+    --surface:      #FFFFFF;  /* Crisp white card surfaces         */
+}
+
+/* ---------- Base / reset ------------------------------------ */
+* {
+    box-sizing: border-box; /* Width/height include padding & border */
+}
+
+body {
+    background-color: var(--bg); /* Clean Off-White page background */
+    margin: 0;                   /* Remove default 8px browser margin */
+    min-height: 100vh;           /* Fill at least the viewport height */
+    min-height: 100dvh;          /* Mobile-friendly: tracks the visible area as the browser bar shows/hides */
+    font-family: Arial, Helvetica, sans-serif; /* Clean, readable font */
+}
+
+/* ============================================================
+   Loading screen (index.php)
+   ============================================================ */
+
+/* Vertical flex column: centers the card, keeps footer at bottom */
+.loader {
+    min-height: 100vh;              /* Fill the viewport height */
+    min-height: 100dvh;             /* Mobile-friendly viewport height */
+    display: flex;
+    flex-direction: column;   /* Stack card (top) and footer (bottom) */
+    justify-content: center;  /* Center the card vertically */
+    align-items: center;      /* Center everything horizontally */
+    padding: 20px;
+    /* Soft teal wash behind the card so the splash matches the palette */
+    background: radial-gradient(circle at 50% 25%, rgba(0, 119, 182, 0.08), transparent 62%);
+}
+
+/* White rounded card that holds logo + progress bar */
+.container {
+    position: relative;       /* Allows absolute positioning inside */
+    width: min(90%, 340px);   /* Responsive: 90% of screen, max 340px */
+    background-color: var(--surface);
+    border-radius: 24px;
+    border: 1.5px solid rgba(0, 119, 182, 0.25); /* subtle teal ring */
+    box-shadow: 0 10px 30px rgba(0, 119, 182, 0.16); /* soft teal shadow */
+    padding: 40px 28px 32px 28px; /* Inner spacing */
+    text-align: center;       /* Center the logo and title text */
+}
+
+/* The app logo image */
+.logo {
+    width: 120px;             /* Fixed width for consistency */
+    height: 120px;            /* Fixed height (square) */
+    object-fit: cover;        /* Crop instead of stretching */
+    border-radius: 30px;      /* Rounded corners to match the theme */
+    margin: 0 auto 16px auto; /* Center it horizontally */
+    display: block;           /* Required so margin:auto works on it */
+}
+
+/* Progress bar + percentage block, sits directly below the logo */
+.progress-area {
+    margin: 0 auto 20px auto; /* Center and add breathing room */
+    width: 100%;              /* Fill the card width */
+}
+
+/* Light teal rounded track that the teal fill slides inside */
+.progress-track {
+    width: 100%;              /* Full width of the card */
+    height: 14px;             /* Bar thickness */
+    background-color: var(--primary-soft); /* Light teal track */
+    border-radius: 999px;     /* Fully rounded ends */
+    overflow: hidden;         /* Clip the fill to the rounded shape */
+}
+
+/* Teal fill bar — width is driven by JavaScript (0% -> 100%) */
+.progress-fill {
+    width: 0%;                /* Starts empty */
+    height: 100%;             /* Fill the whole track height */
+    background-color: var(--primary);/* Brand teal */
+    border-radius: 999px;     /* Rounded ends match the track */
+    transition: width 0.2s ease-out; /* Smooth every step of the animation */
+}
+
+/* The live percentage text under the bar */
+.progress-percent {
+    margin: 10px 0 0 0;       /* Small gap above the text */
+    font-size: 18px;
+    font-weight: bold;        /* Make the number stand out */
+    color: var(--primary);           /* Brand teal */
+    letter-spacing: 1px;
+}
+
+/* App title under the progress bar */
+.apptitle {
+    margin: 0;                /* Remove default heading margin */
+    font-weight: bold;
+    color: var(--primary);
+    font-size: 28px;
+    letter-spacing: 4px;
+}
+
+/* "Developer: Dave Vidad" footer at the bottom of the screen */
+.developer {
+    margin-top: 24px;         /* Gap below the card */
+    font-size: 14px;
+    color: #555555;
+    text-align: center;
+}
+
+/* ============================================================
+   Auth pages (login.php — sliding Login / Create Account panels,
+   and dashboard.php).
+   ============================================================ */
+
+/* Full-height flex container that centers the card on screen */
+.auth-section {
+    min-height: 100vh;              /* Fill the viewport height */
+    min-height: 100dvh;             /* Mobile-friendly viewport height */
+    display: flex;
+    justify-content: center;  /* Center horizontally */
+    align-items: center;      /* Center vertically */
+    padding: 20px;
+}
+
+/* The auth card can be taller than the screen on small phones (long forms).
+   auto margins keep it centered when there is room, and let it scroll from
+   the top without clipping when it is taller than the viewport. */
+.auth-card {
+    margin: auto 0;
+}
+
+/* White rounded card that holds the form */
+.auth-card {
+    width: min(100%, 480px);  /* Responsive: full width up to 480px (Phase 2 shell) */
+    background-color: var(--surface);
+    border-radius: 24px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+    padding: 36px 28px 28px 28px;
+    text-align: center;
+}
+
+/* Small logo at the top of the auth cards */
+.auth-logo {
+    width: 72px;              /* Smaller than the loading logo */
+    height: 72px;
+    object-fit: cover;
+    border-radius: 18px;
+    margin: 0 auto 12px auto;
+    display: block;
+}
+
+/* Card heading ("Create Account" / "Login") */
+.auth-card h2 {
+    margin: 0 0 6px 0;        /* Tighten the spacing under the title */
+    color: var(--primary);
+    font-size: 24px;
+    letter-spacing: 1px;
+}
+
+/* Small gray subtitle under the heading */
+.auth-subtitle {
+    margin: 0 0 22px 0;       /* Space before the form / alert */
+    color: #777777;
+    font-size: 14px;
+}
+
+/* ---------- Sliding auth panels (login + create account) ------
+   The card holds ONE track that is twice as wide as the visible
+   area. Each panel is 50% of that track, so sliding the track
+   left by 50% reveals the second panel. overflow: hidden on the
+   wrapper clips the off-screen panel during the animation. */
+.auth-slider {
+    overflow: hidden;         /* Hide the panel that is off-screen */
+}
+
+.auth-slider-track {
+    display: flex;            /* Panels sit side by side */
+    width: 500%;              /* Five panels worth of width */
+    /* Both the horizontal slide AND the height change animate, so the
+       card smoothly grows/shrinks to match whichever panel is active */
+    transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                height 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The JS toggles these classes to slide between the panels */
+.auth-slider-track.show-register {
+    transform: translateX(-20%);   /* reveal panel 2 (register) */
+}
+
+.auth-slider-track.show-verify {
+    transform: translateX(-40%);   /* reveal panel 3 (verify) */
+}
+
+.auth-slider-track.show-forgot {
+    transform: translateX(-60%);   /* reveal panel 4 (forgot) */
+}
+
+.auth-slider-track.show-reset {
+    transform: translateX(-80%);   /* reveal panel 5 (reset) */
+}
+
+.auth-panel {
+    width: 20%;               /* Each panel is a fifth of the track */
+    flex-shrink: 0;           /* Never let the panels shrink */
+}
+
+/* "Forgot password?" link under the Login button */
+.auth-forgot {
+    margin: 14px 0 0 0;
+    text-align: right;
+    font-size: 13px;
+}
+
+.auth-forgot a {
+    color: var(--primary);
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.auth-forgot a:hover {
+    text-decoration: underline;
+}
+
+/* ---------- Form fields -------------------------------------- */
+/* Each input (with its error message) is wrapped in one of these */
+.form-group {
+    margin-bottom: 16px;      /* Gap between fields */
+    text-align: left;         /* Content sits left-aligned inside the card */
+}
+
+/* ---------- Icon-embedded inputs ------------------------------
+   Each input sits inside a relative wrapper so the SVG icon can
+   be absolutely positioned on the left, and the input gets extra
+   left padding so typed text never overlaps the icon. */
+.input-icon {
+    position: relative;       /* Anchor point for the absolutely-placed icon */
+}
+
+.input-icon svg {
+    position: absolute;       /* Pin the icon inside the input box */
+    left: 14px;               /* Space from the left edge */
+    top: 50%;                 /* Vertical centering ... */
+    transform: translateY(-50%); /* ... accounting for the icon height */
+    width: 18px;              /* Icon size */
+    height: 18px;
+    color: #9aa5a0;           /* Muted gray icon */
+    pointer-events: none;     /* Clicks pass through to the input */
+    transition: color 0.2s;   /* Smooth color change on focus */
+}
+
+/* Room for the icon: 44px left padding instead of the usual 14px.
+   Higher specificity than .form-group input so this rule always
+   wins regardless of its position in the stylesheet. */
+.form-group .input-icon input {
+    padding: 12px 14px 12px 44px; /* top right bottom left */
+}
+
+/* Password fields also reserve 44px on the RIGHT for the eye toggle */
+.form-group .input-icon-password input {
+    padding-right: 44px;
+}
+
+/* ---------- Date of birth: Month / Day / Year dropdowns ----------
+   Three compact selects on one row replace the native browser
+   calendar (which looks different and ugly on every device). The
+   calendar icon sits on the left like the other fields, each select
+   is styled exactly like a text input, and a small chevron replaces
+   the native dropdown arrow. */
+.dob-row {
+    display: flex;            /* Three selects side by side */
+    align-items: center;      /* Vertically center them */
+    gap: 8px;                 /* Gap between the fields */
+    position: relative;       /* Anchor for the calendar icon */
+    padding-left: 44px;       /* Room for the leading icon */
+}
+
+.dob-row > svg {
+    position: absolute;       /* Pin the icon inside the row */
+    left: 14px;               /* Same spot as other field icons */
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    color: #999999;           /* Muted icon like the other fields */
+    pointer-events: none;     /* Taps pass through to the selects */
+}
+
+/* The selects themselves: match the text inputs (border, radius,
+   background, focus glow) but drop the native arrow for a custom
+   chevron drawn with an inline SVG background. */
+.dob-select {
+    flex: 1;                  /* Each select takes equal width */
+    min-width: 0;             /* Allow shrinking below content width */
+    padding: 12px 26px 12px 12px; /* Right space for the chevron */
+    border: 1px solid #cccccc;
+    border-radius: 10px;
+    font-size: 16px;          /* 16px+ prevents iOS auto-zoom */
+    font-family: inherit;
+    color: #333333;
+    background-color: #fafbfa;
+    appearance: none;         /* Remove the native arrow */
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999999' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* The "Month / Day / Year" placeholder option is muted so it reads
+   like a hint, while real values stay dark. */
+.dob-select option {
+    color: #333333;
+}
+
+.dob-select:focus {
+    outline: none;            /* Same teal glow as the inputs */
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(0, 119, 182, 0.15);
+}
+
+/* Slash separators between the fields, like "MM / DD / YYYY" */
+.dob-slash {
+    color: #bbbbbb;
+    font-size: 15px;
+    flex-shrink: 0;           /* Never squish the separator */
+}
+
+/* ---------- Show / hide password eye toggle ------------------- */
+/* An invisible button pinned inside the right side of password
+   inputs; it swaps between an open eye and an eye-off icon. */
+.toggle-password {
+    position: absolute;       /* Pinned inside the input box */
+    right: 6px;               /* Small gap from the right edge */
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;              /* Comfortable tap target */
+    height: 34px;
+    display: inline-flex;     /* Centers the icon */
+    align-items: center;
+    justify-content: center;
+    background: none;         /* Transparent so it looks like an icon */
+    border: none;
+    cursor: pointer;
+    color: #9aa5a0;           /* Muted gray to match the left icon */
+    border-radius: 8px;
+    transition: color 0.2s;
+}
+
+.toggle-password:hover {
+    color: var(--primary);           /* Brand teal on hover */
+}
+
+.toggle-password svg {
+    width: 18px;              /* Same size as the left icons */
+    height: 18px;
+}
+
+/* Icon swap driven by the .showing class (toggled in JS).
+   The eye-off icon is hidden by default; when the password is
+   revealed (.showing) the open eye hides and the eye-off shows.
+   We use explicit display rules instead of the hidden attribute
+   because it is unreliable on SVG elements. */
+.toggle-password .eye-closed {
+    display: none;            /* Eye-off starts hidden */
+}
+
+.toggle-password.showing .eye-open {
+    display: none;            /* Eye hides once the password is shown */
+}
+
+.toggle-password.showing .eye-closed {
+    display: block;           /* Eye-off appears while the password is shown */
+}
+
+/* Turn the icon brand-green while its input is focused */
+.input-icon:focus-within svg {
+    color: var(--primary);
+}
+
+/* ---------- Confirm password match feedback -------------------
+   The JS adds match-ok / match-bad to the confirm field's icon
+   wrapper, tinting the input border green or red, and shows a
+   live message below via the .match-status element. */
+.input-icon.match-ok input {
+    border-color: var(--primary);    /* Teal border when the fields match */
+}
+
+.input-icon.match-bad input {
+    border-color: #d0342c;    /* Red border when they differ */
+}
+
+.match-status {
+    margin: 6px 0 0 0;        /* Small gap below the input */
+    font-size: 12px;
+}
+
+.match-ok-text {
+    color: #1d7a44;           /* Dark green for "Passwords match" */
+}
+
+.match-bad-text {
+    color: #d0342c;           /* Red for "Passwords do not match" */
+}
+
+/* ---------- Password strength meter ---------------------------
+   Four segments below the register password field. The JS sets
+   data-level (0-4) on .strength-area; the rules below fill and
+   color the matching number of segments, plus tint the label. */
+.strength-area {
+    margin-top: 8px;          /* Gap below the input */
+}
+
+/* Meter + label share ONE row: the bar flexes to fill, the label
+   sits right-aligned and never wraps, so the whole strength block
+   takes a single slim line instead of two stacked lines. */
+.strength-row {
+    display: flex;            /* Side-by-side meter + label */
+    align-items: center;      /* Vertically center the label */
+    gap: 10px;                /* Gap between bar and label */
+}
+
+.strength-meter {
+    display: flex;            /* Segments sit side by side */
+    flex: 1;                  /* Bar takes all the leftover width */
+    gap: 4px;                 /* Small gap between segments */
+}
+
+.strength-seg {
+    flex: 1;                  /* Each segment shares the width equally */
+    height: 4px;              /* Slimmer bar keeps the row compact */
+    border-radius: 999px;     /* Fully rounded ends */
+    background-color: #e8ece9;/* Empty (gray) segment */
+    transition: background-color 0.2s; /* Smooth fill */
+}
+
+.strength-label {
+    margin: 0;                /* Aligned inside the flex row */
+    font-size: 11px;
+    color: #999999;           /* Neutral gray until a level is reached */
+    white-space: nowrap;      /* Label stays on the meter row */
+}
+
+/* Level 1 — Weak (red) */
+.strength-area[data-level="1"] .strength-seg:nth-child(-n+1) {
+    background-color: #d0342c;
+}
+
+/* Level 2 — Fair (orange) */
+.strength-area[data-level="2"] .strength-seg:nth-child(-n+2) {
+    background-color: #e8890c;
+}
+
+/* Level 3 — Good (yellow-green) */
+.strength-area[data-level="3"] .strength-seg:nth-child(-n+3) {
+    background-color: #a3b81c;
+}
+
+/* Level 4 — Strong (brand green) */
+.strength-area[data-level="4"] .strength-seg:nth-child(-n+4) {
+    background-color: var(--primary);
+}
+
+/* Tint the level label to match the meter color */
+.strength-area[data-level="1"] .strength-label { color: #d0342c; }
+.strength-area[data-level="2"] .strength-label { color: #e8890c; }
+.strength-area[data-level="3"] .strength-label { color: #7f9614; }
+.strength-area[data-level="4"] .strength-label { color: #1d7a44; }
+
+/* ---------- Password rule checklist ---------------------------
+   A 2x2 grid under the strength meter. Each rule starts gray
+   with an empty circle; when the JS adds .met the circle fills
+   green with a checkmark and the text turns dark green. */
+.rule-list {
+    list-style: none;         /* Remove default bullet points */
+    margin: 8px 0 0 0;        /* Small gap below the meter */
+    padding: 0;
+    display: flex;            /* Single wrap-line of compact pills */
+    flex-wrap: wrap;          /* Wraps only when the row overflows */
+    gap: 4px 12px;            /* Tight spacing between items */
+}
+
+/* Guard: display: grid above would otherwise override the hidden
+   attribute's display: none (author styles beat the UA stylesheet). */
+.rule-list[hidden] {
+    display: none;
+}
+
+/* The one-line success hint that replaces the checklist */
+.rule-hint {
+    margin: 10px 0 0 0;       /* Same gap as the checklist */
+    font-size: 12px;
+    font-weight: bold;
+    color: #1d7a44;           /* Dark green to signal success */
+    animation: hint-in 0.3s ease; /* Gentle fade-in when it appears */
+}
+
+@keyframes hint-in {
+    from {
+        opacity: 0;
+        transform: translateY(-2px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.rule-item {
+    display: inline-flex;     /* Pill sits inline in the wrap row */
+    align-items: center;
+    gap: 5px;                 /* Tighter circle-to-text gap */
+    font-size: 11px;          /* Compact pill text */
+    color: #999999;           /* Unmet rules are muted gray */
+    transition: color 0.2s;
+}
+
+/* The empty circle indicator on the left of each rule */
+.rule-check {
+    width: 12px;              /* Smaller circle for the slim pills */
+    height: 12px;
+    border-radius: 50%;       /* Perfect circle */
+    border: 1.5px solid #cccccc;
+    flex-shrink: 0;           /* Never squish the circle */
+    display: inline-flex;     /* Centers the checkmark */
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+/* Met rule: dark green text */
+.rule-item.met {
+    color: #1d7a44;
+}
+
+/* Met rule: circle fills brand green */
+.rule-item.met .rule-check {
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+/* The white checkmark drawn inside the filled circle */
+.rule-item.met .rule-check::after {
+    content: '\2713';         /* Unicode checkmark */
+    color: var(--surface);
+    font-size: 8px;           /* Fits the smaller circle */
+    font-weight: bold;
+    line-height: 1;
+}
+
+/* Text inputs (text, email, tel, date, password) */
+.form-group input {
+    width: 100%;              /* Fill the card width */
+    padding: 12px 14px;       /* Comfortable tap target */
+    border: 1px solid #cccccc;/* Neutral gray border */
+    border-radius: 10px;      /* Slightly rounded corners */
+    font-size: 16px;          /* 16px+ prevents iOS from auto-zooming on focus */
+    background-color: #fafbfa;
+    transition: border-color 0.2s, box-shadow 0.2s; /* Smooth focus effect */
+}
+
+/* Textareas (description, inquiry message) match the inputs */
+.form-group textarea {
+    width: 100%;              /* Fill the card width */
+    padding: 12px 14px;       /* Same comfortable padding as inputs */
+    border: 1px solid #cccccc;
+    border-radius: 10px;
+    font-size: 16px;          /* 16px+ prevents iOS auto-zoom on focus */
+    font-family: inherit;     /* Keep the app font, not the browser default */
+    background-color: #fafbfa;
+    resize: vertical;         /* Let users grow it, never shrink it */
+    min-height: 100px;
+    box-sizing: border-box;   /* Padding stays inside the width */
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* Highlight the field with green when the user clicks into it */
+.form-group input:focus,
+.form-group textarea:focus {
+    outline: none;            /* Remove the default blue outline */
+    border-color: var(--primary);    /* Teal border */
+    box-shadow: 0 0 0 3px rgba(0, 119, 182, 0.15); /* Soft teal glow */
+}
+
+/* Small red message shown under a field that failed validation */
+.field-error {
+    margin: 6px 0 0 0;
+    font-size: 12px;
+    color: #d0342c;           /* Red */
+}
+
+/* Countdown to the moment another one-time code may be requested.
+   login.php renders it next to the request/resend button; the script on
+   that page adds .is-ready and relabels the text once the wait is over. */
+.code-countdown {
+    margin: 0 0 10px 0;
+    font-size: 12px;
+    color: #888888;           /* Muted grey while counting down */
+    text-align: center;
+}
+
+.code-countdown.is-ready {
+    color: #1d7a44;           /* Dark green to signal success */
+}
+
+/* ---------- Buttons ------------------------------------------ */
+/* Full-width submit button */
+.btn {
+    display: inline-block;
+    width: 100%;              /* Full width of the card */
+    padding: 14px;
+    min-height: 48px;         /* 48px minimum touch target (Phase 2) */
+    background-color: var(--primary);/* Brand teal */
+    color: var(--surface);           /* White text */
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    text-decoration: none;    /* Removes underline when used as a link */
+    transition: background-color 0.2s;
+}
+
+/* The hidden attribute must always win over .btn's display rule.
+   .btn sets display: inline-block, which would otherwise override
+   the browser's [hidden] { display: none } — making "hidden"
+   buttons (e.g. the Inquire button on your OWN profile) still
+   visible. This guard restores the hidden attribute's authority. */
+.btn[hidden] {
+    display: none;
+}
+
+/* Slightly darker teal on hover so the button feels clickable */
+.btn:hover {
+    background-color: var(--primary-dark);
+}
+
+/* Outlined variant (used for the Logout button on the dashboard) */
+.btn-outline {
+    background-color: var(--surface);
+    color: var(--primary);
+    border: 2px solid var(--primary);
+    margin-top: 14px;
+}
+
+.btn-outline:hover {
+    background-color: var(--primary);
+    color: var(--surface);
+}
+
+/* ---------- Alert boxes (error / success feedback) ---------- */
+.alert {
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-bottom: 18px;      /* Gap between the alert and the form */
+    text-align: left;
+}
+
+/* Red alert — validation failure, wrong credentials, DB errors */
+.alert-error {
+    background-color: #fdecec;   /* Light red background */
+    color: #a02620;              /* Dark red text */
+    border: 1px solid #f5b8b4;   /* Red border */
+}
+
+/* Green alert — success feedback (e.g. account created) */
+.alert-success {
+    background-color: #e6f6ec;   /* Light green background */
+    color: #1d7a44;              /* Dark green text */
+    border: 1px solid #a9d9bb;   /* Teal border */
+}
+
+/* Blue alert — informational (e.g. the simulated code box) */
+.alert-info {
+    background-color: #eaf2fb;   /* Light blue background */
+    color: #1c4e7c;              /* Dark blue text */
+    border: 1px solid #bcd4ec;   /* Blue border */
+}
+
+/* Small green feedback line (used in the Privacy & Security tab) */
+.field-ok {
+    margin: 6px 0 0 0;
+    font-size: 12px;
+    color: #1d7a44;
+}
+
+/* ---------- Card footer links -------------------------------- */
+.auth-footer {
+    margin: 20px 0 0 0;
+    font-size: 14px;
+    color: #555555;
+}
+
+.auth-footer a {
+    color: var(--primary);           /* Brand teal link */
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.auth-footer a:hover {
+    text-decoration: underline;
+}
+
+/* The sliding view switcher behaves like a link but needs a
+   pointer cursor (it is not a real navigation link). */
+.toggle-link {
+    cursor: pointer;
+}
+
+/* ============================================================
+   Dashboard (dashboard.php) — profile card
+   ============================================================ */
+
+/* Scrolling content area between the header and the bottom nav.
+   Content is top-aligned (like an app feed) and gets bottom padding
+   so the fixed bottom navigation never covers the last card. */
+.app-content {
+    min-height: 100vh;              /* Fill the viewport height */
+    min-height: 100dvh;             /* Mobile-friendly viewport height */
+    display: flex;
+    justify-content: center;  /* Center horizontally */
+    align-items: flex-start;  /* Content scrolls from the top (app-like) */
+    /* The side gutter scales with the viewport between the phone value
+       (16px) and the desktop one (20px) instead of stepping at a
+       breakpoint. A step here means the shell loses width the moment the
+       screen grows past it — at 768px the two-up cards were 341px wide and
+       at 769px (the desktop gutter) they were 323px, i.e. NARROWER on a
+       bigger screen. The ramp is spread over 727-909px so the change per
+       pixel of viewport is far below one pixel. */
+    padding: 8px clamp(16px, 2.2vw, 20px) calc(96px + env(safe-area-inset-bottom)); /* slim top padding: the header already clears the card, so the feed starts higher */
+}
+
+/* White rounded card that holds the whole profile */
+.dash-card {
+    width: min(100%, 480px);  /* Responsive: full width up to 480px (Phase 2 shell) */
+    background-color: var(--surface);
+    border-radius: 24px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+    /* Same idea as the .app-content gutter above, and for the same reason:
+       the shell's own side padding ramps with the viewport (16px -> 28px)
+       rather than switching at 768px. It tops out at 2.8vw because 2.8vw
+       reaches 28px at the ~1000px viewport where the shell hits its 960px
+       cap — growing it any wider after that would SHRINK the cards inside,
+       since the shell itself can no longer grow. */
+    padding: 18px clamp(16px, 2.8vw, 28px) 28px clamp(16px, 2.8vw, 28px);  /* Slimmer top: the home search bar now starts higher, leaving more room for the feed below */
+    text-align: center;
+}
+
+/* Round avatar: uploaded image or initials circle. It is now a
+   BUTTON (clickable) so reset the default button styling. */
+.dash-avatar {
+    width: 96px;
+    height: 96px;
+    padding: 0;               /* buttons have default padding */
+    border-radius: 50%;
+    overflow: hidden;
+    background-color: #e8ece9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 3px solid var(--primary);
+    font: inherit;            /* inherit the page font */
+}
+
+.dash-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;        /* Crop instead of stretching */
+}
+
+.dash-avatar-initials {
+    font-size: 32px;
+    font-weight: bold;
+    color: var(--primary);
+}
+
+/* Wrapper that anchors the popup menu + badge to the avatar */
+.avatar-wrap {
+    position: relative;
+    display: inline-block;    /* centers inside the card's text-align: center */
+    margin: 0 0 14px 0;
+}
+
+/* Clickable avatar shows a dark "Change photo" overlay on hover */
+.dash-avatar-btn {
+    cursor: pointer;
+}
+
+.avatar-hover {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    color: var(--surface);
+    font-size: 11px;
+    font-weight: bold;
+    opacity: 0;               /* hidden until hover/focus */
+    transition: opacity 0.2s;
+    pointer-events: none;     /* clicks pass through to the avatar */
+}
+
+.avatar-hover svg {
+    width: 22px;
+    height: 22px;
+}
+
+.dash-avatar-btn:hover .avatar-hover,
+.dash-avatar-btn:focus-visible .avatar-hover {
+    opacity: 1;               /* reveal "Change photo" on hover */
+}
+
+/* Always-visible camera badge on the avatar's bottom-right corner */
+.avatar-badge {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background-color: var(--primary);
+    border: 3px solid var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--surface);
+    pointer-events: none;     /* the avatar button gets the clicks */
+}
+
+.avatar-badge svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* Popup action menu (Show / Upload), anchored below the avatar */
+.avatar-menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 220px;
+    background-color: var(--surface);
+    border-radius: 14px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+    padding: 6px;
+    z-index: 60;
+    text-align: left;
+}
+
+/* The hidden attribute must win over any display rule */
+.avatar-menu[hidden] {
+    display: none;
+}
+
+.avatar-menu button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 11px 12px;
+    border: none;
+    background: none;
+    border-radius: 9px;
+    font-size: 14px;
+    color: #333333;
+    cursor: pointer;
+    text-align: left;
+}
+
+.avatar-menu button:hover {
+    background-color: #f0f2f5;
+}
+
+/* "Show Profile Picture" is disabled when the user has no photo */
+.avatar-menu button:disabled {
+    color: #bbbbbb;
+    cursor: not-allowed;
+}
+
+.avatar-menu button:disabled svg {
+    color: #bbbbbb;
+}
+
+.avatar-menu svg {
+    width: 18px;
+    height: 18px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+/* Full-size lightbox viewer (dark backdrop + centered image) */
+.lightbox {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;             /* above the header and bottom nav */
+    animation: lightbox-in 0.2s ease;
+}
+
+.lightbox[hidden] {
+    display: none;
+}
+
+.lightbox img {
+    max-width: 92vw;
+    max-height: 80vh;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.lightbox-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background-color: rgba(255, 255, 255, 0.15);
+    color: var(--surface);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.lightbox-close:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+@keyframes lightbox-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.dash-name {
+    margin: 0;
+    color: var(--primary);
+    font-size: 22px;
+    letter-spacing: 1px;
+}
+
+.dash-id {
+    margin: 4px 0 18px 0;
+    font-size: 13px;
+    color: #777777;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+/* Info rows (email / phone / age / status) */
+.dash-info {
+    text-align: left;
+    border: 1px solid #e8ece9;
+    border-radius: 12px;
+    padding: 6px 16px;
+    margin-bottom: 18px;
+}
+
+.dash-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 0;
+    font-size: 14px;
+    border-bottom: 1px solid #f0f2f1;
+    gap: 12px;
+}
+
+.dash-row:last-child {
+    border-bottom: none;
+}
+
+.dash-row span {
+    color: #888888;
+    flex-shrink: 0;
+}
+
+.dash-row strong {
+    color: #333333;
+    text-align: right;
+    word-break: break-word;   /* long emails wrap instead of overflowing */
+}
+
+/* The upload form itself is hidden — the popup menu triggers it */
+.dash-upload input[type="file"] {
+    display: none;            /* picked up by .click() in the JS */
+}
+
+/* ============================================================
+   Messenger (messenger.php) — Facebook-style chat
+   ============================================================ */
+
+/* Full-height chat app (no bottom nav here) */
+.chat-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+}
+
+/* Back arrow button in the header */
+.chat-back {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background-color: rgba(255, 255, 255, 0.15);
+    color: var(--surface);
+    text-decoration: none;
+    transition: background-color 0.2s;
+}
+
+.chat-back:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+.chat-back svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* The scrolling area under the header */
+.chat-main {
+    flex: 1;
+    width: min(100%, 480px);  /* centered, phone-like column */
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Toolbar above the list (New Message) */
+.chat-list-toolbar {
+    padding: 14px 20px 4px 20px;
+    text-align: right;
+}
+
+.chat-list {
+    list-style: none;
+    margin: 0;
+    padding: 8px 12px 24px 12px;
+}
+
+/* One conversation row: avatar + text + time/badge */
+.chat-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 8px;
+    text-decoration: none;
+    color: #333333;
+    border-bottom: 1px solid #f0f2f1;
+}
+
+.chat-item:hover {
+    background-color: #f7f9f8;
+}
+
+/* Round initials avatar */
+.chat-avatar {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background-color: var(--primary);
+    color: var(--surface);
+    font-weight: bold;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.chat-meta {
+    flex: 1;
+    min-width: 0;             /* allows the preview to ellipsize */
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.chat-meta strong {
+    font-size: 15px;
+    color: #333333;
+}
+
+/* Last-message preview: single line, ellipsized */
+.chat-preview {
+    font-size: 13px;
+    color: #888888;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.chat-time {
+    font-size: 11px;
+    color: #9aa5a0;
+}/* Unread count bubble */
+.chat-unread {
+    background-color: var(--primary);
+    color: var(--surface);
+    font-size: 11px;
+    font-weight: bold;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+}
+
+.chat-chevron {
+    color: #bbbbbb;
+    font-size: 18px;
+}
+
+/* ---------- Messenger settings gear (inbox header) ---------- */
+.msg-gear {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;              /* 48px touch target (Phase 2) */
+    height: 48px;
+    border: none;
+    border-radius: 50%;
+    background-color: rgba(255, 255, 255, 0.15);
+    color: var(--surface);
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.2s;
+}
+
+.msg-gear:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+.msg-gear.active {
+    background-color: var(--surface);
+    color: var(--primary);
+    transform: rotate(30deg);
+}
+
+.msg-gear svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* ---------- Multi-select mode (checkboxes on rows) ---------- */
+.conv-item {
+    display: flex;
+    align-items: center;
+}
+
+.conv-item .chat-item {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Checkbox column: hidden unless select mode is on. */
+.conv-check {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.chat-list.select-mode .conv-check {
+    display: flex;
+}
+
+.chat-list.select-mode .chat-item {
+    pointer-events: none; /* tapping a row selects, never navigates */
+}
+
+/* Custom round checkbox indicator (touch-friendly 22px target) */
+.conv-check input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+}
+
+.conv-checkmark {
+    width: 22px;
+    height: 22px;
+    border: 2px solid #c4ccc8;
+    border-radius: 50%;
+    background: var(--surface);
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+.conv-check input:checked + .conv-checkmark {
+    background-color: var(--primary);
+    border-color: var(--primary);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+    background-size: 14px;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+/* ---------- Floating delete action bar ---------- */
+.conv-actionbar {
+    position: fixed;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border-radius: 999px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+    padding: 8px 10px 8px 18px;
+    width: max-content;
+    max-width: calc(100vw - 32px);
+}
+
+.conv-actionbar[hidden] {
+    display: none;
+}
+
+.conv-actionbar-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: #333333;
+    white-space: nowrap;
+}
+
+/* The pill is the button container, so the inner buttons drop the
+   global .btn-outline margin (and boxy radius) that would otherwise
+   push them out of line. */
+.conv-actionbar .btn {
+    margin-top: 0;
+    border-radius: 999px;
+}
+
+/* ---------- Delete confirmation modal ---------- */
+#convDeleteModal h3 {
+    margin: 4px 0 8px 0;
+    font-size: 17px;
+    color: #222222;
+}
+
+#convDeleteModal p {
+    font-size: 13px;
+    color: #666666;
+    line-height: 1.5;
+    margin: 0 0 16px 0;
+}
+
+#convDeleteModal .modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+#convDeleteModal .modal-actions .btn {
+    margin-top: 0;              /* neutralize .btn-outline's margin */
+    min-width: 96px;            /* equal-width buttons, side by side */
+    text-align: center;
+}
+
+/* Empty-inbox placeholder */
+.chat-empty-box {
+    text-align: center;
+    padding: 60px 24px;
+    color: #888888;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.chat-empty-box svg {
+    width: 44px;
+    height: 44px;
+    color: #b9c2bd;
+    margin-bottom: 10px;
+}
+
+.chat-empty-box strong {
+    color: #555555;
+}
+
+/* ---------- Chat thread view ---------- */
+
+/* Scrollable bubble area (fills the space above the input bar) */
+.chat-thread {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 14px 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chat-empty {
+    text-align: center;
+    color: #999999;
+    font-size: 13px;
+    margin: 20px 0;
+}
+
+/* Banner shown when an inquiry just created this thread */
+.chat-banner {
+    background: #e3f6ea;
+    color: #1d7a44;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 12px;
+    margin: 0 0 12px 0;
+    text-align: center;
+}
+
+/* Green banner variant for the accepted / On the Job state */
+.chat-banner-onthejob {
+    background: #fff3e0;
+    color: #b05600;
+    border: 1px solid #f3d9a8;
+}
+
+/* Formal system notices (hire sent / accepted / declined) */
+.chat-system {
+    align-self: center;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 90%;
+    padding: 7px 14px;
+    background: #eef3f0;
+    color: #5c6b63;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 14px;
+    text-align: center;
+}
+
+.chat-system svg {
+    width: 14px;
+    height: 14px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+/* A HIRE-REQUEST system notice gets a coral accent so the worker
+   spots "sent you a hire request" instantly — it pairs with the
+   ACCEPT / DECLINE decision right below. (Declared after the base
+   .chat-system rules so the coral override wins.) */
+.chat-system-hire {
+    background: #fdf0f0;
+    color: #c0392b;
+    border: 1px solid rgba(255, 107, 107, 0.45);
+}
+
+.chat-system-hire svg {
+    color: var(--coral);
+}
+
+/* The hire-request notice becomes a TAPPABLE button while the hire
+   is pending: tapping it opens the Accept/Decline modal instead of
+   scrolling up to a banner. It keeps the coral system-notice look,
+   adds a pointer cursor + hover lift to signal it can be tapped,
+   and shows a chevron on the right as the affordance. */
+.chat-system-hire-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.chat-system-hire-btn:hover {
+    background: #fbe3e3;
+}
+
+.chat-system-hire-btn:active {
+    transform: scale(0.985);
+}
+
+.chat-system-hire-btn span {
+    flex: 1;
+    min-width: 0;
+}
+
+.chat-system-chevron {
+    width: 14px;
+    height: 14px;
+    color: var(--coral);
+    flex-shrink: 0;
+}
+
+/* Hire decision modal: the Accept and Decline actions sit side by
+   side and stretch evenly across the card (mirrors the messenger's
+   delete-modal action row, but centered for the two equal choices). */
+#hireModal .modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 18px;
+}
+
+#hireModal .modal-action-form {
+    flex: 1;
+    margin: 0;
+}
+
+#hireModal .modal-action-form .btn {
+    width: 100%;
+}
+
+/* Worker decision banner: ACCEPT / DECLINE for a hire request */
+.hire-decision {
+    background: #fff8ec;
+    border: 1px solid #f0dfc0;
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #8a5a00;
+    text-align: center;
+}
+
+/* Client action banner on an ACTIVE (accepted) job: the seeker
+   can finish the job (JOB DONE -> rating modal) or cancel it.
+   The banner keeps the green accent and stacks the two buttons
+   side by side below the status line. */
+.chat-job-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.chat-job-actions form {
+    margin: 0;
+}
+
+/* Message request banner — shown while an inquiry is waiting for
+   the provider to accept it. Distinct from the open chat: a soft
+   card with an icon, the request text, and Accept/Decline for the
+   provider (or a waiting note for the client). */
+.msg-request {
+    display: flex;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid #e2ece5;
+    border-radius: 14px;
+    padding: 14px;
+    margin: 0 0 12px 0;
+    text-align: left;
+}
+
+.msg-request-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+}
+
+.msg-request-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.msg-request-body strong {
+    display: block;
+    font-size: 14px;
+    color: #1d3a2b;
+    margin-bottom: 4px;
+}
+
+.msg-request-body p {
+    font-size: 13px;
+    color: #5c6b63;
+    margin: 0 0 10px 0;
+}
+
+.msg-request-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.msg-request-actions form {
+    margin: 0;
+}
+
+/* JOB DONE — solid coral success action (Coral Sunset) */
+.btn-job-done {
+    background: var(--coral);
+    border-color: var(--coral);
+    color: var(--surface) !important;
+}
+
+.btn-job-done:hover {
+    background: var(--coral-dark);
+}
+
+/* CANCEL — outlined red warning action */
+.btn-job-cancel {
+    background: var(--surface);
+    border-color: #d0342c;
+    color: #d0342c !important;
+}
+
+.btn-job-cancel:hover {
+    background: #d0342c;
+    color: var(--surface) !important;
+}
+
+.hire-decision-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.hire-decision-actions form {
+    margin: 0;
+}
+
+.btn-accept {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--surface) !important;
+}
+
+.btn-accept:hover {
+    background: var(--primary-dark);
+}
+
+.btn-decline {
+    background: var(--surface);
+    border-color: #d0342c;
+    color: #d0342c !important;
+}
+
+.btn-decline:hover {
+    background: #d0342c;
+    color: var(--surface) !important;
+}
+
+/* Top-right HIRE! button in the messenger header */
+.chat-hire-form {
+    margin-left: auto;   /* pins the button to the far right */
+    margin: 0;
+}
+
+.chat-hire-btn {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 20px;
+    background: var(--coral);   /* Coral Sunset: high-priority trigger */
+    color: var(--surface);
+    font-size: 15px;
+    font-weight: 800;
+    font-family: inherit;
+    min-height: 48px;           /* 48px touch target (Phase 2) */
+    display: inline-flex;       /* center the label vertically */
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    transition: transform 0.15s ease;
+}
+
+.chat-hire-btn:hover {
+    transform: scale(1.05);
+}
+
+.chat-hire-btn:active {
+    transform: scale(0.97);
+}
+
+/* Static state chips in the header (pending / hired) */
+.chat-hire {
+    margin-left: auto;
+    padding: 7px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.chat-hire-pending {
+    background: rgba(255, 201, 51, 0.25);
+    color: #ffe9a8;
+    border: 1px solid rgba(255, 201, 51, 0.5);
+}
+
+.chat-hire-done {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--surface);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* Hire / job tag on conversation list items */
+.chat-tag {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.chat-tag.hire {
+    background: #fff4e0;
+    color: #b07600;
+}
+
+.chat-tag.onthejob {
+    background: #e3f6ea;
+    color: #1d7a44;
+}
+
+.chat-tag.done {
+    background: #e8ecf3;
+    color: #3a5a8c;
+}
+
+.chat-tag.cancel {
+    background: #fdeaea;
+    color: #b3261e;
+}
+
+/* Pending message request tag (needs the provider's acceptance) */
+.chat-tag.req {
+    background: #e8f0ff;
+    color: #2a5aa8;
+}
+
+/* One message bubble */
+.chat-bubble {
+    max-width: 78%;
+    padding: 10px 14px;
+    border-radius: 18px;
+    font-size: 15px;
+    line-height: 1.4;
+    word-break: break-word;
+    position: relative;
+}
+
+/* My messages: green, right-aligned (like Facebook Messenger) */
+.chat-bubble.mine {
+    align-self: flex-end;
+    background-color: var(--primary);
+    color: var(--surface);
+    border-bottom-right-radius: 6px;
+}
+
+/* Their messages: white, left-aligned */
+.chat-bubble.theirs {
+    align-self: flex-start;
+    background-color: var(--surface);
+    color: #333333;
+    border: 1px solid #e8ece9;
+    border-bottom-left-radius: 6px;
+}
+
+/* Tiny timestamp inside the bubble */
+.chat-bubble-time {
+    display: block;
+    margin-top: 4px;
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+/* ---------- Long-press per-message delete ---------- */
+/* A bubble that is being held gets a visible ring so the user
+   knows it is selected before the action sheet appears. */
+.chat-bubble.msg-selected {
+    outline: 2px solid var(--coral);
+    outline-offset: 2px;
+}
+
+/* Floating action sheet revealed by a long-press. Fixed to the
+   bottom of the viewport (above the input bar) so it is easy to
+   reach with the thumb, mirroring the conversation action bar. */
+.msg-action-sheet {
+    position: fixed;
+    bottom: 84px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 70;
+    width: min(100% - 28px, 420px);
+    background: var(--surface);
+    border-radius: 14px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+    overflow: hidden;
+    animation: sheet-in 0.18s ease-out;
+}
+
+@keyframes sheet-in {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+.msg-action-sheet-title {
+    display: block;
+    padding: 10px 16px 4px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #8a8f94;
+}
+
+.msg-action-sheet-delete {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 48px;            /* 48px touch target (Phase 2) */
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    border-top: 1px solid #f0f2f4;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--coral);
+    text-align: left;
+    cursor: pointer;
+}
+
+.msg-action-sheet-delete svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.msg-action-sheet-delete:active {
+    background-color: #fdf0f0;
+}
+
+.msg-action-sheet-cancel {
+    width: 100%;
+    min-height: 48px;            /* 48px touch target (Phase 2) */
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    border-top: 1px solid #f0f2f4;
+    font-size: 15px;
+    color: var(--primary);
+    cursor: pointer;
+}
+
+.msg-action-sheet-cancel:active {
+    background-color: #eef4f8;
+}
+
+/* Sticky input bar at the bottom of the chat */
+.chat-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background-color: var(--surface);
+    border-top: 1px solid #e8ece9;
+}
+
+.chat-input input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    padding: 12px 16px;
+    border: 1px solid #cccccc;
+    border-radius: 999px;
+    font-size: 15px;
+    background-color: #f0f2f5;
+    outline: none;
+    transition: border-color 0.2s, background-color 0.2s;
+}
+
+.chat-input input[type="text"]:focus {
+    border-color: var(--primary);
+    background-color: var(--surface);
+}
+
+/* Round send button */
+.chat-send {
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background-color: var(--primary);
+    color: var(--surface);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background-color 0.2s;
+}
+
+.chat-send:hover {
+    background-color: var(--primary-dark);
+}
+
+.chat-send svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* Stop the page scrolling while the lightbox is open */
+.no-scroll {
+    overflow: hidden;
+}
+
+/* Action buttons row (Logout) */
+.dash-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.dash-actions .btn {
+    width: auto;
+    flex: 1;
+    margin-top: 0;
+}
+
+.logout-form {
+    flex: 1;
+    display: flex;
+}
+
+.logout-form .btn {
+    flex: 1;
+}
+
+/* Danger button variant (Logout / Revoke / MFA-off) */
+.btn-danger {
+    background-color: var(--surface);
+    color: #d0342c;
+    border: 2px solid #d0342c;
+}
+
+.btn-danger:hover {
+    background-color: #d0342c;
+    color: var(--surface);
+}
+
+/* Small button (device revoke) */
+.btn-small {
+    padding: 8px 12px;
+    font-size: 13px;
+    width: auto;
+    display: inline-block;
+    min-height: auto;         /* small inline actions stay compact */
+}
+
+/* ============================================================
+   App header + bottom nav (dashboard.php) — Facebook-style
+   ============================================================ */
+
+/* Sticky green top bar with the app logo, like the Facebook header */
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background-color: var(--primary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.app-header-logo {
+    width: 36px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: 10px;
+}
+
+.app-header-title {
+    color: var(--surface);
+    font-size: 19px;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
+
+/* Hamburger menu button pinned to the right of the header bar */
+.header-menu-btn {
+    margin-left: auto;        /* pushes it to the far right */
+    border: none;             /* it is a <button>, not a link */
+    cursor: pointer;
+    padding: 0;
+}
+
+/* The round translucent button look shared by header icons */
+.header-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background-color: rgba(255, 255, 255, 0.15);
+    color: var(--surface);
+    text-decoration: none;
+    transition: background-color 0.2s;
+}
+
+.header-icon:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+.header-icon svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* ---------- Global notification bell (header) ----------
+   The bell reuses .header-icon's round translucent button
+   look; .notif-wrap anchors the dropdown to the bell. On pages
+   without a hamburger (directory) its auto margin pins the bell
+   to the far right of the header. */
+.notif-wrap {
+    position: relative;   /* dropdown is positioned against this */
+    margin-left: auto;    /* far right when the bell stands alone */
+}
+
+/* Right-side cluster (dashboard header): wraps the bell + hamburger
+   so they sit together at the far right corner — bell LEFT of the
+   menu. Its auto margin absorbs the free space in the header. */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;    /* pins the whole cluster to the right */
+}
+
+.header-bell {
+    position: relative;   /* anchors the badge to the bell's corner */
+    border: none;         /* it is a <button>, not a link */
+    cursor: pointer;
+    padding: 0;
+}
+
+/* Unread-count bubble on the bell's top-right corner. Coral so it
+   stands out as an alert against the teal header. */
+.notif-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background-color: var(--coral);
+    color: var(--surface);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 20px;
+    text-align: center;
+    pointer-events: none; /* taps fall through to the bell */
+}
+
+/* Dropdown panel: white card anchored under the bell, right edge
+   aligned so it never overflows the phone viewport. */
+.notif-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 300px;
+    max-width: calc(100vw - 24px);
+    background-color: var(--surface);
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    z-index: 60;
+    overflow: hidden;
+}
+
+/* Small heading pinned to the top of the panel */
+.notif-title {
+    margin: 0;
+    padding: 12px 14px 10px 14px;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--primary);
+    border-bottom: 1px solid #eef1f4;
+}
+
+/* Scrollable list of notification rows */
+.notif-list {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+/* One notification row: a link that jumps into the thread */
+.notif-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    text-decoration: none;
+    color: #1a1d21;
+    font-size: 13px;
+    border-bottom: 1px solid #f1f3f5;
+    transition: background-color 0.15s;
+}
+
+.notif-item:last-child {
+    border-bottom: none;
+}
+
+.notif-item:hover {
+    background-color: var(--primary-soft);
+}
+
+/* Small colored dot signaling the notification type */
+.notif-icon {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.notif-message .notif-icon {
+    background-color: var(--primary);   /* new message  = teal  */
+}
+
+.notif-hire .notif-icon {
+    background-color: var(--coral);     /* hire request = coral */
+}
+
+.notif-job .notif-icon {
+    background-color: #2e9e63;          /* active job   = green */
+}
+
+/* Empty state: "all caught up" */
+.notif-empty {
+    margin: 0;
+    padding: 22px 14px;
+    text-align: center;
+    color: #777777;
+    font-size: 13px;
+}
+
+/* Fixed bottom navigation bar (Home button + Messenger link) */
+.bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    background-color: var(--surface);
+    border-top: 1px solid #e8ece9;
+    padding: 6px 0 calc(6px + env(safe-area-inset-bottom)); /* respect home-indicator areas */
+    z-index: 40;
+}
+
+/* One nav item: icon stacked over a tiny label (like the Facebook app).
+   Used for the Home button AND the Messenger link. */
+.nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 6px 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #9aa5a0;
+    font-size: 11px;
+    font-weight: bold;
+    text-decoration: none;    /* the Messenger item is an <a> link */
+    transition: color 0.2s;
+}
+
+.nav-item svg {
+    width: 24px;
+    height: 24px;
+}
+
+.nav-item:hover {
+    color: var(--primary);
+}
+
+/* The active section: brand-green icon + label */
+.nav-item.active {
+    color: var(--primary);
+}
+
+/* ---------- Sliding dashboard panels -------------------------
+   Same technique as the auth card: the track is 500% wide and
+   holds SIX panels (Home -> Settings menu -> Profile -> islaFIND
+   Profile -> Privacy & Security -> My Jobs); overflow: hidden on
+   the wrapper clips the off-screen panels, and sliding the track
+   left by 16.67% per step reveals the next one. Height animates
+   to match the active panel. */
+.dash-slider {
+    overflow: hidden;         /* Hide the panels that are off-screen */
+}
+
+.dash-slider-track {
+    display: flex;            /* Panels sit side by side */
+    width: 700%;              /* Seven panels worth of width */
+    /* Both the horizontal slide AND the height change animate, so the
+       card smoothly grows/shrinks to match whichever panel is active */
+    transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                height 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The JS toggles these classes to slide between the panels */
+.dash-slider-track.show-menu {
+    transform: translateX(-14.2857%);   /* reveal panel 2 (Settings menu) */
+}
+
+.dash-slider-track.show-profile {
+    transform: translateX(-28.5714%);   /* reveal panel 3 (Profile) */
+}
+
+.dash-slider-track.show-isla {
+    transform: translateX(-42.8571%);   /* reveal panel 4 (islaFIND Profile) */
+}
+
+.dash-slider-track.show-security {
+    transform: translateX(-57.1429%);   /* reveal panel 5 (Privacy & Security) */
+}
+
+.dash-slider-track.show-jobs {
+    transform: translateX(-71.4286%);   /* reveal panel 6 (My Jobs) */
+}
+
+.dash-slider-track.show-saved {
+    transform: translateX(-85.7143%);   /* reveal panel 7 (Saved Listings) */
+}
+
+/* NOTE: the track is 700% and every panel is 1/7 of it, so each
+   step is 14.2857% — add a panel and BOTH numbers must change
+   (along with one .show-* transform above). */
+.dash-panel {
+    width: 14.2857%;          /* Each panel is a seventh of the track */
+    flex-shrink: 0;           /* Never let the panels shrink */
+}
+
+/* ---------- Home panel (search bar + welcome + feed) ---------- */
+
+/* Rounded search pill at the top of the feed, like the Facebook app.
+   Fixed height keeps the pill from growing when the clear (x) button
+   appears — without it the pill jumps a few px taller. */
+.search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: #f0f2f5;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 11px 16px;
+    height: 44px;
+    box-sizing: border-box;
+    margin-bottom: 20px;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.search-bar svg {
+    width: 18px;
+    height: 18px;
+    color: #9aa5a0;
+    flex-shrink: 0;
+}
+
+.search-bar input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    outline: none;
+    font-size: 15px;
+    color: #333333;
+}
+
+.search-bar input::placeholder {
+    color: #9aa5a0;
+}
+
+/* Focused search pill turns white with a green ring */
+.search-bar:focus-within {
+    background-color: var(--surface);
+    border-color: var(--primary);
+}
+
+/* Empty-state feed placeholder (no posts yet) */
+.feed-empty {
+    border: 1px dashed #d5dad7;
+    border-radius: 14px;
+    padding: 28px 20px;
+    color: #888888;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.feed-empty svg {
+    width: 36px;
+    height: 36px;
+    color: #b9c2bd;
+    margin-bottom: 8px;
+}
+
+.feed-empty strong {
+    color: #555555;
+}
+
+/* Settings menu hub: rows with icon, label, and chevron */
+.menu-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+}
+
+.menu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 14px 6px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid #f0f2f1;
+    cursor: pointer;
+    color: #333333;
+    font-size: 15px;
+    text-align: left;
+    transition: color 0.2s;
+}
+
+.menu-item:hover {
+    color: var(--primary);
+}
+
+.menu-item svg {
+    width: 22px;
+    height: 22px;
+    color: var(--primary);           /* Brand-teal icons like the app accents */
+    flex-shrink: 0;
+}
+
+/* Full-width button variant (used for the bottom Log Out) */
+.btn-block {
+    display: block;
+    width: 100%;
+}
+
+/* Log Out pinned at the bottom of the settings hub: separated
+   from the menu list with a divider + generous touch padding */
+.settings-logout {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid #f0f2f1;
+}
+
+.settings-logout .btn {
+    margin: 0;                /* the wrapper provides the spacing */
+    padding: 13px 16px;       /* comfortable, touch-friendly target */
+    font-weight: 700;
+}
+
+.menu-label {
+    flex: 1;                  /* Pushes the chevron to the far right */
+}
+
+.menu-chevron {
+    color: #bbbbbb;
+    font-size: 20px;
+    line-height: 1;
+}
+
+/* ---------- Collapsible sections (e.g. Change Password) ----------
+   A full-width button row that reveals its body when tapped. */
+.collapse-toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 14px 6px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid #f0f2f1;
+    cursor: pointer;
+    color: #333333;
+    font-size: 15px;
+    text-align: left;
+    transition: color 0.2s;
+}
+
+.collapse-toggle:hover {
+    color: var(--primary);
+}
+
+.collapse-toggle svg {
+    width: 22px;
+    height: 22px;
+    color: var(--primary);           /* brand-green icon like the menu rows */
+    flex-shrink: 0;
+}
+
+/* The chevron spins to point down when the section is open */
+.collapse-toggle .menu-chevron {
+    margin-left: auto;
+    transition: transform 0.3s;
+}
+
+.collapse-toggle.open .menu-chevron {
+    transform: rotate(90deg);
+}
+
+/* The expandable body (hidden via the hidden attribute) */
+.collapse-body {
+    padding-top: 14px;
+}
+
+/* Guard: the hidden attribute must win */
+.collapse-body[hidden] {
+    display: none;
+}
+
+/* Privacy & Security sub-views: only the chosen option's content is
+   visible — the options list hides while a view is open. */
+.sec-view[hidden],
+#securityOptions[hidden] {
+    display: none;
+}
+
+/* Smooth, pro-style transitions for the security options.
+   The card height already morphs via .dash-slider-track's transition;
+   these add a fade + upward slide so switching between Change Password
+   / MFA / Device Logins feels polished. Animations restart when the
+   element's display flips (hidden -> shown). */
+@keyframes secViewIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.sec-view,
+#securityOptions {
+    animation: secViewIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The three option rows cascade in one after another (a subtle
+   stagger) when the list reappears. 'backwards' keeps each row at
+   its start state during the delay so they don't flash in early. */
+#securityOptions .collapse-toggle {
+    animation: secViewIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+
+#securityOptions .collapse-toggle:nth-child(2) {
+    animation-delay: 0.07s;
+}
+
+#securityOptions .collapse-toggle:nth-child(3) {
+    animation-delay: 0.14s;
+}
+
+/* Back link at the top of sub-panels (returns to the Settings menu).
+   Block-level with a fit-content width so it always occupies its OWN
+   line: as inline-flex it would share a row with the next inline
+   element (the avatar in the Profile panel is inline-block, which put
+   the button beside the picture). Auto margins keep it centered. */
+.panel-back {
+    display: block;
+    width: fit-content;
+    margin: 0 auto 4px auto;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--primary);
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.panel-back:hover {
+    text-decoration: underline;
+}
+
+/* Section heading inside the Privacy & Security panel */
+.sec-section {
+    margin: 18px 0 10px 0;
+    color: var(--primary);
+    font-size: 14px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-bottom: 1px solid #e8ece9;
+    padding-bottom: 6px;
+    text-align: left;
+}
+
+/* A group inside the panel (change password, MFA toggle, ...) */
+.sec-block {
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.sec-block h5 {
+    margin: 0 0 8px 0;
+    font-size: 15px;
+    color: #333333;
+}
+
+.sec-hint {
+    margin: 0 0 10px 0;
+    font-size: 12px;
+    color: #888888;
+    text-align: left;
+}
+
+/* Device list inside the Privacy & Security panel */
+.device-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.device-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid #f0f2f1;
+}
+
+.device-item:last-child {
+    border-bottom: none;
+}
+
+.device-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    min-width: 0;
+    text-align: left;
+}
+
+.device-meta span {
+    color: #888888;
+}
+
+.device-status {
+    font-weight: bold;
+}
+
+.device-status.on  { color: #1d7a44; }  /* Active session */
+.device-status.off { color: #999999; }  /* Logged out session */
+
+/* Per-device action buttons (Logout / Revoke) sit on the right */
+.device-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+    align-items: center;
+}
+
+.device-actions form {
+    margin: 0;                /* forms are inline here, not blocks */
+}
+
+.device-actions .btn-small {
+    margin-top: 0;            /* override .btn-outline's top margin */
+    padding: 7px 10px;
+    font-size: 12px;
+}
+
+/* ---------- Home feed (recommendations) ---------- */
+
+/* A category section in the cold-start feed */
+.feed-section {
+    margin: 18px 0 0 0;
+    text-align: left;
+}
+
+.feed-section-title {
+    font-size: 15px;
+    color: #333333;
+    margin: 0 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e8ece9;
+}
+
+/* The catalogue's heading row: the results title on the left, the sort
+   pill on the right, sharing one line (and one underline). The results
+   heading and the sort control stay together so re-ordering the list is
+   always one tap away from the list itself. */
+.feed-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 12px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e8ece9;
+}
+
+/* Inside the row the title drops its own underline (the row carries it)
+   so the rule still runs the full width, like every other feed section. */
+.feed-head .feed-section-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.feed-head .feed-sort {
+    flex: 0 0 auto;
+}
+
+/* Horizontal scrollable carousel (cold-start top-3 rails) */
+.feed-rail {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding: 4px 2px 12px 2px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+}
+
+.feed-rail .feed-card {
+    flex: 0 0 78%;            /* cards mostly fill the screen width */
+    scroll-snap-align: start;
+}
+
+/* A provider card inside the feed */
+.feed-card {
+    background: #f7faf8;
+    border: 1px solid #e2ece5;
+    border-radius: 14px;
+    padding: 14px;
+    text-align: left;
+}
+
+/* Live-search hiding: the hidden attribute must beat the flex
+   rules on cards and sections (feed-rail uses display:flex). */
+.feed-card[hidden],
+.feed-section[hidden] {
+    display: none !important;
+}
+
+/* Feed cards are tappable: they open the full detail modal */
+.feed-card-clickable {
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.feed-card-clickable:hover,
+.feed-card-clickable:focus-visible {
+    border-color: var(--primary);
+    box-shadow: 0 4px 14px rgba(0, 119, 182, 0.18);
+    transform: translateY(-1px);
+    outline: none;
+}
+
+.feed-card-clickable:active {
+    transform: translateY(0);
+}
+
+/* Subtle "tap for details" affordance at the card footer */
+.feed-card-hint {
+    display: block;
+    margin-top: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.feed-card-top {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    /* The Save heart rides in this row (see .feed-card-top .inline-save),
+       so the row must be free to wrap: a long business name keeps a
+       readable column instead of being squeezed into a sliver to fit the
+       pill (the same fix .provider-card-top already carries). */
+    flex-wrap: wrap;
+}
+
+/* Heart BESIDE the name, pinned to the right edge of the row — the same
+   spot it occupies on a directory card and in the detail modal.
+   margin-left:auto is what pushes it across; flex-shrink:0 keeps the
+   pill a comfortable tap target (>= 29px tall, over the 24px minimum)
+   rather than letting a long name squash it. */
+.feed-card-top .inline-save {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.feed-card-pic {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #e8f3ec;
+}
+
+.feed-card-pic-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    font-weight: 800;
+    font-size: 20px;
+}
+
+.feed-card-head {
+    min-width: 0;
+}
+
+.feed-card-head h5 {
+    margin: 0 0 4px 0;
+    font-size: 15px;
+    color: #222222;
+}
+
+/* "On the Job" status bar: bleeds across the top of the feed card
+   so the worker's live status is visible in the feed itself. Only
+   Individual Skills listings show it, and only after an accepted
+   hire (employer + worker agreed). */
+.feed-card-onthejob {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    margin: -14px -14px 12px -14px;   /* stretch to the card edges */
+    padding: 8px;
+    background: #fff3e0;
+    border-bottom: 1px solid #f3d9a8;
+    border-radius: 14px 14px 0 0;      /* match the card corners */
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    color: #b05600;
+}
+
+.otj-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #e07b00;
+    animation: otjPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes otjPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.4; transform: scale(0.75); }
+}
+
+/* Compact chip variant used inside the detail modal */
+.pm-onjob {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 12px;
+    background: #fff3e0;
+    border: 1px solid #f3d9a8;
+    color: #b05600;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* Per-listing rating row on provider cards */
+.card-rating {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 13px;
+}
+
+.card-rating .stars {
+    color: #f5a623;          /* gold stars */
+    letter-spacing: 1px;
+    font-size: 14px;
+}
+
+.card-rating .rating-num {
+    font-weight: 700;
+    color: #333333;
+}
+
+.card-rating .rating-count {
+    color: #8a9890;
+    font-size: 12px;
+}
+
+.card-rating .rating-none {
+    color: #aab4ae;
+    font-size: 12px;
+    font-style: italic;
+}
+
+/* Account phone line on provider cards */
+.provider-phone {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0 0 0;
+    font-size: 13px;
+    color: #4a5a50;
+}
+
+.provider-phone svg {
+    width: 14px;
+    height: 14px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+/* Description snippet on INDIVIDUAL SKILLS cards (feed + directory) */
+.card-desc {
+    margin: 8px 0 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #4a5a50;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Available-units badge on BUSINESS cards */
+.card-units {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0 0 0;
+    padding: 5px 10px;
+    background: #fff8ec;
+    border: 1px solid #f0dfc0;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #8a5a00;
+    width: fit-content;
+}
+
+.card-units svg {
+    width: 14px;
+    height: 14px;
+    color: #b07600;
+    flex-shrink: 0;
+}
+
+/* Municipality + barangay badge on BUSINESS directory cards */
+.card-location {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    margin: 8px 0 0 0;
+    padding: 5px 10px;
+    background: #eef4fb;
+    border: 1px solid #dce8f5;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #3a5a8c;
+}
+
+.card-location svg {
+    width: 14px;
+    height: 14px;
+    color: #3a5a8c;
+    flex-shrink: 0;
+}
+
+/* Proximity label inside the location pill, written by the Home feed's
+   script only while search results are ranked nearest-first ("2.3 km
+   away"). It lives in the pill so the card gains no extra row for it. */
+.card-location .card-distance {
+    font-weight: 800;
+    color: var(--primary-dark);
+}
+
+.card-location .card-distance::before {
+    content: "\00b7";           /* middle-dot separator */
+    margin-right: 5px;
+    font-weight: 400;
+    color: #9bb0c6;
+}
+
+.card-location .card-distance[hidden] {
+    display: none;
+}
+
+/* "Get Directions" button in the profile detail modal (a pinned BUSINESS
+   listing). Deliberately BLUE (not the app's teal) so it reads as
+   navigational, distinct from the teal inquiry/action buttons. Opens the
+   Google Maps app or browser route planner via the deep link built by
+   openProviderDetail() in dashboard.php. */
+.btn-map {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 8px;
+    padding: 10px 14px;
+    background: #2563eb;
+    color: var(--surface) !important;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: background 0.2s ease;
+}
+
+.btn-map:hover {
+    background: #1d4ed8;
+}
+
+.btn-map svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+/* "Get Route" button in the profile detail modal. The blue map
+   button sits in the stacked .pm-actions column, so it takes the
+   full width and lets the column's gap handle the spacing. */
+.pm-actions .btn-map {
+    margin: 0;
+    width: 100%;
+}
+
+/* The modal hides "Get Directions" for anything that is not a pinned
+   business; display must lose to the [hidden] attribute. */
+.btn-map[hidden] {
+    display: none !important;
+}
+
+/* Wrapper pairing the modal's map button with its hint, so the two
+   stack as one unit inside the .pm-actions column. */
+.pm-route {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+/* Small "Starts from your location" caption under every Get
+   Directions button. It tells the visitor why the browser may ask
+   for a location before that prompt appears, so it is deliberately
+   quiet: muted text, a tiny crosshair icon, and left-aligned next to
+   the icon rather than centred like a button label. */
+.route-hint {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    margin: 6px 2px 0;
+    color: #6b7b85;
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.route-hint svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+/* The modal shows/hides the hint from JS; flex must lose to [hidden]. */
+.route-hint[hidden] {
+    display: none !important;
+}
+
+/* Account-sync notice on the streamlined profile form */
+.sync-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 4px 0 14px 0;
+    padding: 10px 12px;
+    background: var(--primary-soft);
+    border: 1px solid #d3ecdd;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #1d7a44;
+    text-align: left;
+}
+
+.sync-notice svg {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+    color: var(--primary);
+}
+
+/* ---------- Location step (municipality cascade + GPS pin) ------ */
+
+/* GPS pin button: outline style so it reads as a secondary action
+   next to the solid-green submit button, but stays big and tappable
+   on mobile (the .btn base already makes it full-width). */
+.btn-pin {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 2px solid var(--primary);
+    color: var(--primary-dark);
+    font-weight: 700;
+}
+
+.btn-pin:hover {
+    background: var(--primary-soft);
+}
+
+/* While the GPS fix is pending the button is disabled + relabeled */
+.btn-pin:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+
+.btn-pin svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+/* Status box under the pin button: shows the captured coordinates
+   and the "View on map" preview link (mint, like the sync notice). */
+.pin-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--primary-soft);
+    border: 1px solid #d3ecdd;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: #1d7a44;
+}
+
+.pin-status[hidden] {
+    display: none;
+}
+
+.pin-status a {
+    color: var(--primary-dark);
+    font-weight: 700;
+    text-decoration: underline;
+}
+
+/* ---------- BUSINESS Google Maps pin (create_profile.php) ------ */
+
+/* Instruction line under the pin block ("Open Google Maps..."),
+   matching the muted hint style used elsewhere. */
+.map-picker-hint {
+    margin: 8px 0 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #888888;
+    text-align: left;
+}
+
+/* Flag on an owner's own BUSINESS listing that still has no map pin.
+   The pin is required for businesses (save_profile.php), so these
+   listings were saved before that rule and need one added before the
+   directory can show a route button. Amber = warning, never an error:
+   the listing itself is fine, it is just missing its spot. */
+.pin-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 10px 0;
+    padding: 10px 12px;
+    background: #fff8ec;
+    border: 1px solid #f0dfc0;
+    border-radius: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #8a5a00;
+    text-align: left;
+}
+
+.pin-warning svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;       /* keep the icon square while the text wraps */
+    margin-top: 1px;
+}
+
+.pin-warning strong {
+    display: block;       /* headline sits on its own line */
+}
+
+/* Panel-level count of every pinless business listing (dashboard) */
+.pin-warning-summary {
+    margin: 0 0 14px 0;
+}
+
+/* Rating-unlock prompt on Home (completed jobs awaiting a review) */
+.rate-prompt {
+    background: #fff8ec;
+    border: 1px solid #f0dfc0;
+    border-radius: 14px;
+    padding: 14px;
+    margin: 14px 0 4px 0;
+    text-align: left;
+}
+
+.rate-prompt h4 {
+    margin: 0 0 8px 0;
+    font-size: 15px;
+    color: #8a5a00;
+}
+
+.rate-prompt-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid #f3e6cd;
+    font-size: 13px;
+    color: #333333;
+}
+
+.rate-prompt-item .btn {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+/* ---------- star picker in the rate modal ---------- */
+.star-picker {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin: 6px 0 14px 0;
+}
+
+.star-picker .star {
+    background: none;
+    border: none;
+    font-size: 34px;
+    line-height: 1;
+    color: #d8d8d8;           /* empty star color */
+    cursor: pointer;
+    padding: 2px;
+    transition: color 0.15s, transform 0.15s;
+}
+
+.star-picker .star:hover {
+    transform: scale(1.15);
+}
+
+/* Painted stars (1..selected) turn gold */
+.star-picker .star.on {
+    color: #f5a623;
+}
+
+/* ---------- islaFIND Profile panel (dashboard) ---------- */
+
+/* Empty state: no profile yet -> icon + CTA button */
+.isla-empty {
+    text-align: center;
+    padding: 18px 6px 8px 6px;
+}
+
+.isla-empty svg {
+    width: 56px;
+    height: 56px;
+    color: var(--primary);
+    margin-bottom: 10px;
+}
+
+.isla-empty p {
+    margin: 4px 0;
+    font-size: 13px;
+    color: #666666;
+}
+
+.isla-empty p strong {
+    color: #333333;
+    font-size: 15px;
+}
+
+/* The prominent "Create an islaFIND Profile" button */
+.btn-isla {
+    display: block;
+    margin: 14px auto 10px auto;
+    max-width: 260px;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: var(--surface) !important;
+    font-weight: 700;
+    border-radius: 28px;
+    padding: 12px 20px;
+    box-shadow: 0 4px 14px rgba(0, 119, 182, 0.35);
+    text-decoration: none;
+}
+
+.btn-isla:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(0, 119, 182, 0.45);
+}
+
+/* Provider card shown when the user already has a profile */
+.provider-card {
+    background: #f7faf8;
+    border: 1px solid #e2ece5;
+    border-radius: 14px;
+    padding: 14px;
+    text-align: left;
+}
+
+.provider-card-top {
+    display: flex;
+    /* The gap, the avatar and the pill's padding all RAMP with the viewport
+       (see .provider-card-pic and .provider-card-top .save-btn): they used to
+       be pinned flat inside a max-width:768px block, which meant all three
+       jumped the instant the screen grew past 768px. The card itself gets
+       wider there, so the card never shrank — but the NAME column did, from
+       163px to 140px, because the furniture grew faster than the card. Each
+       ramp ends at its old desktop value and starts at its old tablet value,
+       so phones are untouched and ~920px+ is exactly as it was. */
+    gap: clamp(10px, 1.3vw, 12px);
+    align-items: center;
+    /* The listing name and the Save heart share this row (see
+       .provider-card-top .inline-save below). When the row is too
+       narrow for both, the heart wraps onto its own right-aligned
+       line instead of squeezing the name — a business name is the
+       one thing on the card that cannot be abbreviated. */
+    flex-wrap: wrap;
+}
+
+.provider-card-pic {
+    /* 48px on a phone (unchanged), 64px once there is room: 7vw is 48px at
+       686px and 64px at 914px viewport, so the avatar grows across the whole
+       tablet range instead of stepping at 768px. */
+    width: clamp(48px, 7vw, 64px);
+    height: clamp(48px, 7vw, 64px);
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #e8f3ec;
+}
+
+.provider-card-pic-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    font-weight: 800;
+    font-size: 22px;
+}
+
+.provider-card-head {
+    /* flex-basis is deliberately small (8rem) and matched by min-width:
+       that pair is what decides WHEN the heart wraps. The row fits
+       while name + heart need <= the card, and the name still keeps
+       8rem (about a 16-character line) when the heart drops below. */
+    flex: 1 1 8rem;
+    min-width: 8rem;
+}
+
+.provider-card-head h5 {
+    margin: 0 0 4px 0;
+    font-size: 16px;
+    color: #222222;
+    /* A long single word ("ANIKA_RENTALS_AND_COTTAGES") must wrap rather
+       than push the Save heart out of the card. */
+    overflow-wrap: break-word;
+}
+
+.provider-badge {
+    display: inline-block;
+    background: var(--primary);
+    color: var(--surface);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 20px;
+}
+
+
+.provider-desc {
+    margin: 10px 0 0 0;
+    font-size: 13px;
+    color: #555555;
+    line-height: 1.5;
+}
+
+.provider-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.provider-card-actions .btn {
+    margin: 0;
+}
+
+/* The Delete form inside the actions row sits inline like a button */
+.inline-del {
+    margin: 0;
+}
+
+.inline-del .btn-danger {
+    padding: 8px 12px;
+    font-size: 13px;
+    width: auto;
+    display: inline-block;
+}
+
+/* Received inquiries list */
+.inquiry-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.inquiry-item {
+    background: #f7faf8;
+    border: 1px solid #e2ece5;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    text-align: left;
+}
+
+.inquiry-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.inquiry-meta strong {
+    color: #222222;
+}
+
+.inquiry-meta span {
+    color: #999999;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.inquiry-text {
+    margin: 8px 0;
+    font-size: 13px;
+    color: #444444;
+    line-height: 1.5;
+}
+
+.inquiry-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.inquiry-status {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 3px 9px;
+    border-radius: 20px;
+}
+
+.inquiry-status.st-pending      { background: #fff4e0; color: #b07600; }
+.inquiry-status.st-pending_hire { background: #fff4e0; color: #b07600; }
+.inquiry-status.st-accepted     { background: #fff3e0; color: #b05600; }
+.inquiry-status.st-declined     { background: #f0f1f0; color: #8a918c; }
+.inquiry-status.st-cancelled    { background: #fdeaea; color: #b3261e; }
+.inquiry-status.st-available    { background: #e3f6ea; color: #1d7a44; }
+.inquiry-status.st-replied      { background: #e8ecf3; color: #3a5a8c; }
+
+.inquiry-form {
+    display: flex;
+    gap: 6px;
+}
+
+.inquiry-form form {
+    margin: 0;
+}
+
+.inquiry-form .btn-small {
+    margin: 0;
+}
+
+/* ---------- create_profile.php (multi-step form) ---------- */
+
+/* Step 1 — Profile type: two side-by-side tappable cards */
+.type-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr); /* two cards, app-like picker */
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.type-card {
+    position: relative;
+    display: block;
+    padding: 18px 10px;
+    border: 1.5px solid #d5e2da;
+    border-radius: 14px;
+    background: var(--surface);
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+/* Hide the radio input but keep it keyboard-focusable.
+   top/left are NOT optional here: an absolutely positioned box with no
+   offsets stays at its STATIC position — the card's CONTENT box, i.e.
+   inside its 10px side padding — while `width: 100%` measures the
+   card's PADDING box. The control therefore overshot its card by
+   exactly that padding and dragged the whole create-profile page into
+   sideways scrolling on a phone (18-58px of it). Pinning it to the
+   card's own origin makes 100% cover the card exactly. */
+.type-card input {
+    position: absolute;
+    top: 0;
+    left: 0;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: pointer;
+}
+
+.type-card-title {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    color: #333333;
+    line-height: 1.25;
+}
+
+.type-card-sub {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: #8a9890;
+    line-height: 1.3;
+}
+
+/* The active card turns green like the app accent */
+.type-card.active {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    box-shadow: 0 3px 10px var(--primary-glow);
+}
+
+.type-card.active .type-card-title {
+    color: var(--primary-dark);
+}
+
+.type-card:focus-within {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* The card sinks slightly while being tapped — instant tactile feedback */
+.type-card:active {
+    transform: scale(0.97);
+}
+
+/* Soft reveal for fields that appear after a profile-type switch
+   (search bar, business name, description / units — see showField()
+   in profile_script.js). display:none can't be transitioned, so a
+   freshly shown field plays this short fade+slide instead. */
+@keyframes fieldReveal {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.field-in {
+    animation: fieldReveal 0.25s ease;
+}
+
+/* Step 2 — Searchable sub-category dropdown */
+.subcat-field-group {
+    position: relative;   /* anchor for the absolutely-placed dropdown */
+}
+
+/* The dropdown list: hidden by default, shown via .open (JS) */
+.subcat-options {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    display: none;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid #d5e2da;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    max-height: 220px;
+    overflow-y: auto;     /* scroll long lists inside the dropdown */
+}
+
+.subcat-options.open {
+    display: block;
+}
+
+.subcat-option {
+    display: block;
+    width: 100%;
+    padding: 11px 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    font-size: 14px;
+    font-family: inherit;
+    text-align: left;
+    color: #333333;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.subcat-option:hover {
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+}
+
+/* Barangay select matches the other icon inputs */
+.form-group .input-icon select {
+    width: 100%;
+    padding: 12px 14px 12px 44px;
+    border: 1px solid #cccccc;
+    border-radius: 10px;
+    font-size: 16px;
+    font-family: inherit;
+    color: #333333;
+    background-color: #fafbfa;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-group .input-icon select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(0, 119, 182, 0.15);
+}
+
+/* Optional profile picture: dashed drop-zone style picker */
+.file-pick {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px;
+    border: 1.5px dashed #c9d8cf;
+    border-radius: 10px;
+    background: #fafbfa;
+    font-size: 13px;
+    color: #4a5a50;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.file-pick:hover {
+    border-color: var(--primary);
+    background: #f2faf5;
+}
+
+.file-pick svg {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    color: var(--primary);
+}
+
+.file-pick input[type="file"] {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+}
+
+/* Label above the description textarea */
+.field-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #333333;
+    text-align: left;
+}
+
+/* Live character counter under the textarea */
+.field-counter {
+    display: block;
+    margin-top: 5px;
+    font-size: 11px;
+    color: #999999;
+    text-align: right;
+}
+
+/* ---------- Catalogue filters (Home feed) --------------------
+   These came across with directory.php when its listings moved into
+   the Home feed: profile-type toggle, category chips, sort + live
+   count, all over the same .feed-card the rails use. */
+
+/* Category filter chips row */
+.feed-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.chip {
+    padding: 7px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;       /* buttons don't inherit the app font */
+    color: #4a5a50;
+    background: #f0f5f2;
+    border: 1px solid #e0eae4;
+    min-height: 48px;           /* 48px touch target (Phase 2) */
+    text-decoration: none;
+    text-align: center;
+    cursor: pointer;            /* buttons need an explicit pointer */
+    transition: all 0.2s ease;
+}
+
+.chip.on {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--surface);
+}
+
+/* Hide the browser's native search cancel button — the app draws
+   its own clear (x) so the look is identical on every browser. */
+.search-bar input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+/* Clear (x) button inside the search pill; shown via JS only while
+   the box has text. Needs an explicit [hidden] rule because the
+   button's own display would otherwise beat the hidden attribute. */
+.search-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #d7ddd9;
+    color: var(--surface);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.2s ease;
+}
+
+/* SVG X stays perfectly centered in the circle */
+.search-clear svg {
+    width: 12px;
+    height: 12px;
+}
+
+.search-clear[hidden] {
+    display: none;
+}
+
+.search-clear:hover {
+    background: var(--primary);
+}
+
+/* Profile-type filter: compact version of the create-page type
+   cards — green highlight on the active option, press feedback,
+   smooth 0.2s transition. Filtering is client-side (see the Home
+   feed filters in dashboard.php), so the toggle never reloads. */
+.feed-type-toggle {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.feed-type-btn {
+    padding: 10px 6px;
+    border: 1.5px solid #d5e2da;
+    border-radius: 12px;
+    background: var(--surface);
+    font-size: 12px;
+    font-weight: 700;
+    font-family: inherit;
+    color: #333333;
+    min-height: 48px;           /* 48px touch target (Phase 2) */
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.feed-type-btn:active {
+    transform: scale(0.97);
+}
+
+.feed-type-btn.on {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+    box-shadow: 0 3px 10px var(--primary-glow);
+}
+
+/* Catalogue cards fade in when a profile-type or category filter is
+   applied (reuses the fieldReveal keyframe used by the create-profile
+   form). */
+.feed-card.feed-in {
+    animation: fieldReveal 0.25s ease;
+}
+
+/* The card a Save toggle came back to (#listing-N) is ringed briefly, so
+   the visitor can see WHICH listing just changed. */
+.feed-card.is-flash {
+    animation: feedFlash 1.8s ease;
+}
+
+@keyframes feedFlash {
+    0%, 100% { box-shadow: none; }
+    15%      { box-shadow: 0 0 0 3px var(--primary-glow); }
+}
+
+/* NOTE: the catalogue used to be a TWO-UP grid from 600px up, back when it
+   had a page of its own and that page carried the wider shell. It now lives
+   inside the Home panel, whose shell is the ordinary 480px one shared with
+   six other panels — two columns here would make every card NARROWER than it
+   is on a phone, so the catalogue is a single-column list (.feed-list, see
+   below) and matches the rails and the Saved list exactly. */
+
+.btn-inquire {
+    background: var(--primary);
+    color: var(--surface) !important;
+}
+
+.btn-inquire:hover {
+    background: var(--primary-dark);
+}
+
+/* Inquiry modal: centered card over a dark backdrop */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.modal[hidden] {
+    display: none;
+}
+
+.modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    animation: fadeIn 0.2s ease;
+}
+
+.modal-card {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 22px 20px 20px 20px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+    animation: fadeIn 0.2s ease;
+}
+
+/* ---------- Provider detail modal (feed card tap) ---------- */
+.provider-modal-card {
+    max-width: 420px;
+}
+
+.pm-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 6px;
+    text-align: left;
+}
+
+.pm-pic {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #e8f3ec;
+}
+
+.pm-head {
+    min-width: 0;
+}
+
+.pm-head h4 {
+    font-size: 17px;
+    color: #222222;
+}
+
+/* Name + Save heart share ONE row, so the bookmark sits BESIDE the
+   listing name (the same place as .provider-card-top .inline-save on a
+   card) instead of down in the action stack. flex-wrap lets the pill
+   drop under a long business name on the narrowest phones rather than
+   squeezing the name into a sliver. */
+.pm-name-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 6px 0;
+}
+
+/* Two classes deep on purpose: .modal-card h4 (further down this file)
+   sets a 4px bottom margin at the same specificity, which would nudge
+   the name off the pill's centre line and gap the badges. */
+.pm-head .pm-name-row h4 {
+    margin: 0;
+    flex: 1 1 auto;      /* the name yields the row to the pill */
+    min-width: 0;
+}
+
+/* margin-left:auto pins the heart to the right edge of the name row when
+   the name does not fill it; flex-shrink:0 keeps the pill a comfortable
+   tap target (>= 29px tall) instead of letting it squash. */
+.pm-head .pm-name-row .inline-save {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.pm-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.pm-type {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #8a9890;
+    background: #f0f5f2;
+    border: 1px solid #e0eae4;
+    padding: 3px 8px;
+    border-radius: 12px;
+}
+
+.pm-rating {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    font-size: 14px;
+    text-align: left;
+}
+
+/* Detail rows (barangay / phone / jobs) */
+.pm-details {
+    list-style: none;
+    margin: 12px 0 0 0;
+    padding: 0;
+    text-align: left;
+}
+
+.pm-details li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 0;
+    border-bottom: 1px solid #f0f5f2;
+    font-size: 14px;
+    color: #333333;
+}
+
+.pm-details li:last-child {
+    border-bottom: 0;
+}
+
+.pm-details svg {
+    width: 16px;
+    height: 16px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.pm-details li:empty {
+    display: none;
+}
+
+/* Contextual block inside the detail modal: the full description
+   (individual) or the unit-count row (business). */
+.pm-context {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: #f0faf4;
+    border: 1px solid #d9ecdf;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #2c4436;
+    text-align: left;
+}
+
+.pm-context svg {
+    width: 16px;
+    height: 16px;
+    color: var(--primary);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.pm-context p {
+    margin: 0;
+}
+
+.pm-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.pm-actions .btn {
+    margin: 0;
+    width: 100%;
+}
+
+/* Disabled buttons stay visible but are not clickable */
+.btn:disabled,
+.btn[disabled] {
+    background: #eef1ef;
+    border-color: #d9dfdc;
+    color: #aab4ae;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.btn:disabled:hover,
+.btn[disabled]:hover {
+    background: #eef1ef;
+    border-color: #d9dfdc;
+    color: #aab4ae;
+}
+
+/* ============================================================
+   Loading / busy states (busy.js + the fetch-based actions)
+   Every action in the app gets a visible loading effect: a
+   running spinner on the button it came from, or a centered
+   loading row inside panels that fill in asynchronously.
+   ============================================================ */
+
+/* Shared spinner animation */
+@keyframes spin360 {
+    to { transform: rotate(360deg); }
+}
+
+/* Real spinner element — used inside loading rows/panels */
+.spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin360 0.65s linear infinite;
+    flex-shrink: 0;
+}
+
+/* Centered "spinner + label" row for containers that load
+   asynchronously (notification list, reviews list, …) */
+.loading-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 18px 10px;
+    margin: 0;
+    font-size: 13px;
+    color: #6b7a72;
+    text-align: center;
+}
+
+.loading-row .spinner {
+    color: var(--primary);
+}
+
+/* Busy submit button: locked, soft teal, spinner running in
+   front of the label (drawn with a pseudo-element so no DOM
+   injection is needed). Variant colors are intentionally
+   replaced by ONE shared loading look, so a busy button always
+   reads the same way wherever it is. */
+.btn.is-loading,
+.btn.is-loading:disabled,
+.btn.is-loading[disabled],
+.btn.is-loading:hover {
+    cursor: wait;
+    pointer-events: none;
+    background-color: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary-dark);
+    box-shadow: none;
+    opacity: 1;
+}
+
+.btn.is-loading::before,
+.chat-send.is-loading::before,
+.btn-pin.is-loading::before,
+.chat-hire-btn.is-loading::before {
+    content: '';
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 8px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin360 0.65s linear infinite;
+    vertical-align: -2px;
+}
+
+/* Coral HIRE! button (not a .btn — give it the same busy look) */
+.chat-hire-btn.is-loading,
+.chat-hire-btn.is-loading:hover,
+.chat-hire-btn.is-loading:active {
+    cursor: wait;
+    pointer-events: none;
+    opacity: 0.85;
+    transform: none;
+}
+
+/* Round send button in the chat: hide the paper plane and show
+   the spinner alone (centered — no side margin here). */
+.chat-send.is-loading,
+.chat-send.is-loading:disabled,
+.chat-send.is-loading:hover {
+    cursor: wait;
+    pointer-events: none;
+    background-color: var(--primary-dark);
+    opacity: 0.9;
+}
+
+.chat-send.is-loading svg {
+    display: none;
+}
+
+.chat-send.is-loading::before {
+    width: 16px;
+    height: 16px;
+    margin-right: 0;
+}
+
+/* GPS pin button while the location fix is pending (the label
+   is already swapped to "Locating…" by maps_pinning.js) */
+.btn-pin.is-loading {
+    cursor: wait;
+    opacity: 0.75;
+    pointer-events: none;
+}
+
+/* Profile-picture upload: dim the avatar and run a spinner
+   right over it while upload_profile.php processes the file. */
+.avatar-wrap.is-uploading .dash-avatar {
+    position: relative;
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+.avatar-wrap.is-uploading .avatar-hover,
+.avatar-wrap.is-uploading .avatar-menu,
+.avatar-wrap.is-uploading .avatar-badge {
+    pointer-events: none;
+}
+
+.avatar-wrap.is-uploading .dash-avatar::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 28px;
+    height: 28px;
+    margin: -14px 0 0 -14px;
+    border: 3px solid var(--primary-glow);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin360 0.65s linear infinite;
+    z-index: 2;
+}
+
+/* ---------- Reviews modal (per-star breakdown) ---------- */
+.reviews-modal-card {
+    max-width: 420px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Star filter tabs: ALL / 5★ / 4★ / 3★ / 2★ / 1★ */
+.rev-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 12px 0 4px 0;
+    text-align: left;
+}
+
+.rev-tab {
+    padding: 6px 11px;
+    border: 1px solid #d5e2da;
+    border-radius: 16px;
+    background: var(--surface);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #4a5a50;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.rev-tab.on {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--surface);
+}
+
+.rev-tab-count {
+    opacity: 0.75;
+    font-weight: 700;
+}
+
+/* Scrollable review list */
+.rev-list {
+    flex: 1;
+    overflow-y: auto;
+    margin-top: 8px;
+    text-align: left;
+}
+
+.rev-item {
+    padding: 12px 2px;
+    border-bottom: 1px solid #f0f5f2;
+}
+
+.rev-item:last-child {
+    border-bottom: 0;
+}
+
+.rev-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+
+.rev-stars {
+    color: #f5a623;
+    letter-spacing: 1px;
+    font-size: 13px;
+}
+
+.rev-date {
+    margin-left: auto;
+    font-size: 11px;
+    color: #aab4ae;
+}
+
+.rev-comment {
+    margin: 6px 0 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #4a5a50;
+}
+
+.rev-empty {
+    padding: 18px 0;
+    text-align: center;
+    font-size: 13px;
+    color: #aab4ae;
+}
+
+.modal-card h4 {
+    margin: 0 0 4px 0;
+    color: #222222;
+}
+
+.modal-close {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    background: none;
+    border: none;
+    font-size: 26px;
+    line-height: 1;
+    color: #888888;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.modal-close:hover {
+    color: #333333;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* ---------- Accessibility -------------------------------------
+   Keyboard focus ring: several controls below set outline: none on
+   :focus (the teal glow replaces it for text fields), which leaves
+   keyboard users with no visible position. :focus-visible restores
+   a clear ring for keyboard navigation only — mouse and touch
+   interaction look exactly as before. */
+:focus-visible {
+    outline: 3px solid var(--primary-glow);
+    outline-offset: 2px;
+}
+
+/* Respect the OS "reduce motion" setting: every reveal, slide and
+   spinner becomes effectively instant instead of looping. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ============================================================
+   Finishing touches (Phase 12)
+   Shared polish for the pieces added last: the 404 screen, the
+   owner-facing listing stats, the directory sort control, the
+   saved-listings heart, the password strength meter and the
+   account danger zone. All of them reuse the design tokens above.
+   ============================================================ */
+
+/* ---------- 404 page (404.php) ------------------------------- */
+.notfound {
+    text-align: center;
+}
+
+/* The app's map pin, with the status code sitting in the pin head */
+.notfound-art {
+    position: relative;
+    display: inline-block;
+    color: var(--primary);
+    line-height: 0;
+}
+
+.notfound-art svg {
+    width: 108px;
+    height: 108px;
+    opacity: 0.9;
+}
+
+.notfound-code {
+    position: absolute;
+    left: 50%;
+    top: 42%;
+    transform: translate(-50%, -50%);
+    font-size: 21px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--primary-dark);
+    line-height: 1;
+}
+
+.notfound-title {
+    margin: 8px 0 6px 0;
+    font-size: 20px;
+    color: #12313f;
+}
+
+.notfound-actions {
+    display: flex;
+    flex-direction: column;   /* stacked on phones */
+    gap: 10px;
+    margin-top: 18px;
+}
+
+@media (min-width: 520px) {
+    .notfound-actions {
+        flex-direction: row;              /* side by side once there is room */
+        justify-content: center;
+    }
+}
+
+/* ---------- Listing stats for the owner (dashboard.php) ------- */
+/* Views / inquiries / reviews of ONE listing, in a muted row so the
+   card stays scannable and the numbers never outshine the actions. */
+.card-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 8px 0 2px 0;
+    font-size: 12px;
+    color: #5b6b76;
+}
+
+.card-stats span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.card-stats svg {
+    width: 14px;
+    height: 14px;
+    color: var(--primary);
+}
+
+.card-stats strong {
+    color: var(--primary-dark);
+}
+
+/* ---------- Saved Listings panel (dashboard.php) -------------- */
+/* "Saved Aug 12, 2026" — a quiet line under each bookmark card, so
+   the panel reads as a list of things kept rather than a shopping
+   cart. */
+.saved-since {
+    margin: 8px 0 0 0;
+    font-size: 11.5px;
+    color: #8a97a0;
+}
+
+/* Bookmarks stack vertically inside the dashboard card (the same
+   .provider-card look the directory uses). */
+#dashSaved .provider-card {
+    margin: 0 0 12px 0;
+    text-align: left;
+}
+
+/* ---------- Catalogue sort + count (Home feed) ---------------- */
+.feed-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 2px 0 12px 0;
+}
+
+/* A search hides the toolbar to leave just the heading + its cards;
+   flex must lose to the [hidden] attribute. */
+.feed-toolbar[hidden] {
+    display: none;
+}
+
+/* Count of what the filters currently show (left of the sort box) */
+.feed-count {
+    font-size: 12.5px;
+    color: #6b7b85;
+}
+
+.feed-count strong {
+    color: var(--primary-dark);
+}
+
+/* Left cluster of the catalogue toolbar: the Filters reveal + the count */
+.feed-toolbar-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* The one-tap reveal for the catalogue's filter furniture. The panel it
+   opens ships COLLAPSED (see .feed-filter-panel): on a phone the chip
+   wall is taller than the results themselves, so a search opens straight
+   onto its listings and the filters appear only when asked for. */
+.feed-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--surface);
+    border: 1px solid #dfe6ea;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #41525c;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.feed-filter-btn svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+    color: var(--primary);
+}
+
+/* Open, or holding an active filter: the pill turns on either way, so a
+   collapsed panel never hides the fact that it is filtering. */
+.feed-filter-btn[aria-expanded="true"],
+.feed-filter-btn.on {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+}
+
+.feed-filter-panel {
+    margin-bottom: 12px;
+}
+
+/* Inside the panel the chip grid's own bottom margin moves to the panel,
+   so collapsing/expanding leaves a single 12px gap. */
+.feed-filter-panel .feed-filters {
+    margin-bottom: 0;
+}
+
+.feed-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--surface);
+    border: 1px solid #dfe6ea;
+    border-radius: 999px;
+    font-size: 13px;
+    color: #41525c;
+}
+
+.feed-sort svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+    color: var(--primary);
+}
+
+.feed-sort select {
+    border: none;
+    background: transparent;
+    font: inherit;
+    font-weight: 600;
+    color: #41525c;
+    padding: 2px 0;
+    cursor: pointer;
+}
+
+.feed-sort select:focus {
+    outline: none;
+}
+
+/* The catalogue's results are a vertical LIST, not a sideways rail:
+   search hits are something you scan, and a stack keeps every card
+   (and its heart) on screen without swiping. */
+.feed-list .feed-card {
+    margin-bottom: 12px;
+}
+
+
+/* Wrapper for the heart form so the flex action row keeps its padding */
+.inline-save {
+    margin: 0;
+}
+
+/* ---------- Saved-listing heart (directory + feed modal) ------- */
+.save-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    background: var(--surface);
+    border: 1px solid #dfe6ea;
+    border-radius: 999px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: #41525c;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.save-btn svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+}
+
+.save-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+/* Saved: warm red tint + a FILLED heart (CSS fills the outline glyph) */
+.save-btn.is-saved {
+    background: #ffeceb;
+    border-color: #ffc7c3;
+    color: #c0392b;
+}
+
+.save-btn.is-saved svg path {
+    fill: currentColor;
+}
+
+/* In a plain .modal-actions row the button sits on the left, actions right */
+.modal-actions .save-btn {
+    margin-right: auto;       /* keeps Save on the left, actions right */
+}
+
+/* On a card the heart sits BESIDE the listing name (directory +
+   Saved Listings), pinned to the right edge of the header row — the
+   detail modal's .pm-name-row above does the same for a feed card.
+   margin-left:auto is what pushes it across; flex-shrink:0 keeps the
+   pill a comfortable tap target on a phone, so a long business name
+   wraps onto a second line instead of squashing the button. */
+.provider-card-top .inline-save {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+/* The pill's own padding ramps too (6-7px vertical, 10-12px horizontal), so
+   it stops being a 2px step in the name's column width at 768px. The tap
+   target stays >= 29px tall, comfortably over the 24px minimum. */
+.provider-card-top .save-btn {
+    padding: clamp(6px, 0.9vw, 7px) clamp(10px, 1.4vw, 12px);
+}
+
+/* ---------- Password strength meter (password_strength.js) ---- */
+.pw-meter {
+    margin: 6px 0 2px 0;
+}
+
+.pw-meter-track {
+    display: flex;
+    gap: 4px;
+}
+
+.pw-meter-seg {
+    flex: 1;
+    height: 5px;
+    background: #e4e9ec;
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+.pw-meter-seg.is-weak { background: #e74c3c; }
+.pw-meter-seg.is-fair { background: #f39c12; }
+.pw-meter-seg.is-good { background: #2ecc71; }
+
+.pw-meter-label {
+    margin: 5px 0 0 0;
+    font-size: 11.5px;
+    color: #7a8891;
+}
+
+.pw-meter-label.is-weak { color: #c0392b; }
+.pw-meter-label.is-fair { color: #b9770e; }
+.pw-meter-label.is-good { color: #1e8449; }
+
+/* ---------- Account danger zone (dashboard.php) ---------------- */
+.danger-zone {
+    margin-top: 20px;
+    padding: 14px;
+    background: #fff6f5;
+    border: 1px solid #f3c9c5;
+    border-radius: 14px;
+    text-align: left;
+}
+
+.danger-zone h5 {
+    margin: 0 0 6px 0;
+    font-size: 15px;
+    color: #b02318;
+}
+
+.danger-zone p {
+    margin: 0 0 10px 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: #8a4a44;
+}
+
+.danger-zone ul {
+    margin: 0 0 12px 0;
+    padding-left: 18px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #8a4a44;
+}
+
+.danger-zone code {
+    padding: 1px 5px;
+    background: #fff;
+    border: 1px solid #f0cfcb;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #b02318;
+}
+
+/* ============================================================
+   Responsive tweaks (tablets and phones)
+   ============================================================ */
+
+/* Tablets and phones: no frame, full-bleed like a native mobile app */
+@media (max-width: 768px) {
+    body {
+        border: none;         /* Remove the green frame entirely */
+    }
+
+    .loader,
+    .auth-section,
+    .app-content {
+        min-height: 100vh;    /* Fill the full screen with no border to subtract */
+        min-height: 100dvh;
+    }
+
+    /* Card header furniture was measured rather than guessed: the avatar
+       (64px) and the Save/Remove pill (~75px) plus their gaps ate ~163px of
+       a ~265px card, which squeezed a long business name into a 68px column
+       ("Anika Beach Resort and Cottages" wrapped onto FIVE lines). The name is
+       the one thing on the card that cannot be abbreviated, so the furniture
+       was shrunk — but it was shrunk with flat values HERE, which made the
+       avatar, the gap and the pill's padding all step (and the name column
+       shrink) at 769px. They are clamp() ramps in their base rules now
+       (.provider-card-pic, .provider-card-top, .provider-card-top .save-btn),
+       so nothing is overridden in this block. */
+
+    /* The side gutter and the shell padding are NOT overridden here any
+       more: both are clamp() ramps in their base rules, so they slide from
+       the tablet values to the desktop ones across 727-909px (gutter) and
+       ~571-1000px (shell) with no step to trip over. Pinning a flat tablet
+       value here would just re-create the cliff at 769px. */
+}
+
+/* Small phones: tighter spacing and scaled-down elements */
+@media (max-width: 480px) {
+    .loader,
+    .auth-section,
+    .app-content {
+        /* 16px is the floor of the clamp() in the base rule, so pinning it
+           here cannot create a step at 481px (make the two agree if you
+           ever change one). Keep room for the bottom nav. */
+        padding: 6px 16px calc(96px + env(safe-area-inset-bottom));
+    }
+
+    .container,
+    .auth-card {
+        padding: 14px 20px 22px 20px; /* Tighter padding on phones (slim top so the feed starts higher) */
+    }
+
+    /* .dash-card deliberately keeps its clamped side padding here (16px at
+       this size) so the phone -> tablet transition stays smooth; only the
+       vertical ends tighten. */
+    .dash-card {
+        padding-top: 14px;
+        padding-bottom: 22px;
+    }
+
+    .logo {
+        width: 100px;         /* Scale the logo down on phones */
+        height: 100px;
+    }
+
+    .auth-logo {
+        width: 60px;          /* Scale the auth logo down too */
+        height: 60px;
+    }
+
+    .apptitle {
+        font-size: 24px;      /* Slightly smaller title on phones */
+        letter-spacing: 3px;
+    }
+}

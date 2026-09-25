@@ -1,0 +1,24 @@
+{
+    "name": "davevidad/islafind",
+    "description": "islaFIND — a community services directory for Bantayan Island: listings, messaging, hiring and verified reviews.",
+    "type": "project",
+    "license": "MIT",
+    "keywords": ["directory", "services", "bantayan", "philippines", "php", "mysql"],
+    "require": {
+        "php": ">=8.0",
+        "ext-pdo": "*",
+        "ext-mbstring": "*",
+        "phpmailer/phpmailer": "^6.9"
+    },
+    "scripts": {
+        "test": [
+            "@php dashboard_smoke_test.php",
+            "@php render_smoke_test.php"
+        ],
+        "serve": "php -S localhost:8000",
+        "schema": "@php -r \"echo 'Import final_app.sql with HeidiSQL or phpMyAdmin', PHP_EOL;\""
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

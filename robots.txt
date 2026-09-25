@@ -1,0 +1,36 @@
+# islaFIND — crawler rules
+#
+# Everything behind a login is private: account pages, chats,
+# notifications and uploaded profile pictures. Only the two public
+# entry points (the splash screen and the login/registration page)
+# are worth indexing, and even those exist purely to reach the app.
+
+User-agent: *
+Allow: /$
+Allow: /index.php
+Allow: /login.php
+Disallow: /404.php
+Disallow: /create_profile.php
+Disallow: /dashboard.php
+Disallow: /delete_conversations.php
+Disallow: /delete_message.php
+Disallow: /delete_profile.php
+Disallow: /hire_action.php
+Disallow: /logout.php
+Disallow: /messenger.php
+Disallow: /messenger_poll.php
+Disallow: /notifications.php
+Disallow: /profile_script.js
+Disallow: /provider_reviews.php
+Disallow: /rate_service.php
+Disallow: /save_listing.php
+Disallow: /save_profile.php
+Disallow: /send_message.php
+Disallow: /setup_own.php
+Disallow: /_smtp_test.php
+Disallow: /dashboard_smoke_test.php
+Disallow: /render_smoke_test.php
+Disallow: /track_view.php
+Disallow: /upload_profile.php
+Disallow: /uploads/
+Disallow: /vendor/

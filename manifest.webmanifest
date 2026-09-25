@@ -1,0 +1,28 @@
+{
+  "name": "islaFIND — Bantayan Island Services",
+  "short_name": "islaFIND",
+  "description": "Find and hire trusted local service providers on Bantayan Island — mechanics, electricians, resorts, rentals, shops and more.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "index.php",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F8F9FA",
+  "theme_color": "#0077B6",
+  "categories": ["business", "lifestyle", "travel"],
+  "icons": [
+    {
+      "src": "img/isla_logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "img/isla_logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+# ============================================================
+# .gitignore — what must never be committed
+# The project is not under version control yet; this file is here
+# so that `git init && git add .` is SAFE when it is. The critical
+# entry is .env: it holds the database and SMTP passwords.
+# ============================================================
+
+# --- Secrets --------------------------------------------------
+# .env is the real configuration; .env.example is the template and
+# IS committed.
+.env
+.env.*
+!.env.example
+
+# --- Composer dependencies ------------------------------------
+# Reinstalled with `composer install` from composer.lock.
+/vendor/
+
+# --- User uploads ---------------------------------------------
+# Profile pictures belong to the accounts that uploaded them, not
+# to the repository. The folder's .htaccess rule IS committed.
+/uploads/*
+!/uploads/.htaccess
+
+# --- Logs and OS clutter --------------------------------------
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editor / IDE folders -------------------------------------
+.idea/
+.vscode/
+*.swp
+
+# --- Local verification artifacts ------------------------------
+# screenshots/ holds the responsive-layout captures taken while
+# testing the shell by hand. Nothing in the app, the tests or the
+# README references them, they are 5 MB of regenerable PNGs, and the
+# repo is what a host deploys from — so they stay local. Remove this
+# rule and `git add screenshots` if they should be versioned.
+/screenshots/
+
+# --- Local backups of the dump --------------------------------
+*final_app*.sql.bak

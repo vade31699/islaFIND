@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="islaFIND logo">
+  <!-- ==========================================================
+       islaFIND logo (Phase 2 re-theme)
+       A white map pin ("FIND") containing a small island
+       ("ISLA") floats on a teal gradient tile that matches the
+       app design tokens:
+         primary       #0077B6 (Ocean Teal)
+         primary-dark  #005F92 (gradient end)
+         primary-soft  #E6F2F9 (the sea inside the pin)
+       The mark is vector drawn, so it stays crisp at every
+       size: 120px splash, 72px login, 36px app header.
+       ========================================================== -->
+
+  <!-- Teal gradient (top-left to bottom-right) -->
+  <defs>
+    <linearGradient id="tealTile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#0077B6"/> <!-- Ocean Teal   -->
+      <stop offset="1"   stop-color="#005F92"/> <!-- darker teal  -->
+    </linearGradient>
+    <!-- Clip keeps the sea and island inside the round pin head -->
+    <clipPath id="seaClip">
+      <circle cx="512" cy="410" r="150"/>
+    </clipPath>
+  </defs>
+
+  <!-- Rounded teal tile background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#tealTile)"/>
+
+  <!-- White map pin (teardrop shape, tip pointing at the location) -->
+  <path d="M512 190
+           C396 190 322 268 322 372
+           C322 486 512 668 512 668
+           C512 668 702 486 702 372
+           C702 268 628 190 512 190 Z"
+        fill="#FFFFFF"/>
+
+  <!-- Light teal "sea" clipped inside the pin head -->
+  <g clip-path="url(#seaClip)">
+    <circle cx="512" cy="410" r="150" fill="#E6F2F9"/>
+    <!-- Island silhouette copied from island.jpg: a single dark
+         palm-cluster (two dense frond fans, curving trunks, and a
+         ground mound) in the logo's dark teal for a simple look -->
+    <path d="M404 512 Q 512 456 620 512 Z" fill="#005F92"/>
+
+    <!-- Palm 1 (left): curved trunk + five frond blades + nuts -->
+    <path d="M452 508 Q 454 448 462 392" fill="none" stroke="#005F92" stroke-width="16" stroke-linecap="round"/>
+    <g stroke="#005F92" stroke-width="14" stroke-linecap="round" fill="none">
+      <path d="M462 392 Q 434 358 402 372"/>
+      <path d="M462 392 Q 450 346 462 346"/>
+      <path d="M462 392 Q 490 358 522 372"/>
+      <path d="M462 392 Q 436 402 418 424"/>
+      <path d="M462 392 Q 488 402 506 424"/>
+    </g>
+    <circle cx="457" cy="389" r="7" fill="#005F92"/>
+    <circle cx="467" cy="389" r="7" fill="#005F92"/>
+
+    <!-- Palm 2 (right): slightly smaller, leaning the other way -->
+    <path d="M578 506 Q 574 452 566 404" fill="none" stroke="#005F92" stroke-width="15" stroke-linecap="round"/>
+    <g stroke="#005F92" stroke-width="14" stroke-linecap="round" fill="none">
+      <path d="M566 404 Q 540 372 512 388"/>
+      <path d="M566 404 Q 554 360 566 360"/>
+      <path d="M566 404 Q 592 372 620 388"/>
+      <path d="M566 404 Q 544 414 528 434"/>
+      <path d="M566 404 Q 588 414 604 434"/>
+    </g>
+    <circle cx="561" cy="401" r="6.5" fill="#005F92"/>
+    <circle cx="571" cy="401" r="6.5" fill="#005F92"/>
+
+    <!-- Sun: a white dot above the island -->
+    <circle cx="562" cy="328" r="22" fill="#FFFFFF"/>
+  </g>
+</svg>

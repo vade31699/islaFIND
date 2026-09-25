@@ -1,0 +1,5 @@
+# Security: uploaded files must NEVER be executed as scripts.
+# If someone manages to upload a .php file, this denies serving it.
+<FilesMatch "\.(php|php[0-9]|phtml|phar)$">
+    Require all denied
+</FilesMatch>
