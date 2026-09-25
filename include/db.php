@@ -5,24 +5,21 @@
 // whole app talks to the same MySQL connection.
 //
 // Credentials are read from .env (see env.php / .env.example).
-// The WAMP values below are only FALLBACKS used when a key is
-// missing, so a fresh checkout still runs without a .env file
-// while a real deployment keeps its password out of the source.
+// The WAMP values are only FALLBACKS used when a key is missing,
+// so a fresh checkout still runs without a .env file while a real
+// deployment keeps its password out of the source.
+//
+// The DSN, the credentials and the TLS setup live in
+// db_settings.php rather than here, because the session store
+// needs the same connection details at a moment when this file has
+// not run yet — session_start() happens before db.php on most
+// pages. See that file for the TLS reasoning.
 // ============================================================
 
-// --- 1. Make env() available ----------------------------------
-// env.php parses .env on include; it has no other dependencies,
-// so it is cheap enough to load on every request.
-require_once __DIR__ . '/env.php';
-
-// --- 2. Connection settings -----------------------------------
-// env(key, fallback) checks the process environment first, then
-// .env, then the fallback. A real password belongs in .env only.
-$db_host = env('DB_HOST', 'localhost');   // MySQL server address (WAMP runs it locally)
-$db_port = env('DB_PORT', '3306');        // MySQL port (WAMP default)
-$db_name = env('DB_NAME', 'final_app');   // Database created in Phase 1 via HeidiSQL
-$db_user = env('DB_USER', 'root');        // WAMP's default MySQL username
-$db_pass = env('DB_PASS', '');            // WAMP's default MySQL password (empty)
+// --- 1. One place knows how to connect -------------------------
+// db_settings.php also includes env.php, so env() is available to
+// every page from here on. Both are dependency-free and cheap.
+require_once __DIR__ . '/db_settings.php';
 
 /**
  * isla_ensure_schema(PDO $pdo)
@@ -34,9 +31,9 @@ $db_pass = env('DB_PASS', '');            // WAMP's default MySQL password (empt
  * Why here instead of only in final_app.sql: an existing deployment
  * must not have to re-import the dump to use a new feature. Every
  * statement is CREATE TABLE IF NOT EXISTS, so it is a no-op once the
- * table exists, and the once-per-session guard in step 4 (or the
- * plain call from a CLI script) keeps even that no-op off the hot
- * path of every request.
+ * table exists, and the once-per-session guard below (or the plain
+ * call from a CLI script) keeps even that no-op off the hot path of
+ * every request.
  *
  * A failure here must NOT take the whole app down, so errors are
  * logged and swallowed — the only consequence is that the bookmarks
@@ -107,56 +104,14 @@ function isla_ensure_schema(PDO $pdo): void
     }
 }
 
-// --- 3. Try to open the connection ---------------------------
+// --- 2. Try to open the connection ----------------------------
 try {
-    // Build the DSN: which driver, host, port, database, and charset.
-    // utf8mb4 guarantees full UTF-8 support (emoji, accents, etc.).
-    $dsn = 'mysql:host=' . $db_host . ';port=' . $db_port . ';dbname=' . $db_name . ';charset=utf8mb4';
+    // The DSN, credentials and TLS options are built by
+    // isla_db_pdo() (see db_settings.php). It throws PDOException on
+    // failure, which the catch below turns into the app's screen.
+    $pdo = isla_db_pdo();
 
-    // --- 3a. Connection options ---------------------------------
-    // The two attributes below used to be set AFTER connecting; they
-    // are passed to the constructor instead, so there is one place
-    // that decides how the connection behaves.
-    $pdo_options = [
-        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ];
-
-    // --- 3b. TLS for a managed MySQL server ---------------------
-    // TiDB Cloud Serverless (and most managed MySQL) REFUSE plaintext
-    // connections, and PDO ignores the DSN's ssl-mode entirely — the
-    // certificate has to be handed to the driver through these
-    // constants. Local WAMP needs none of it: leave DB_SSL_CA empty
-    // (the default) and this whole block does nothing.
-    $db_ssl_ca = env('DB_SSL_CA', '');
-    if ($db_ssl_ca !== '') {
-        // A relative path is resolved against the project root (this
-        // file lives in include/, hence the '../'), so .env can say
-        // "certs/islandCA.pem" and the same file keeps working
-        // wherever the app is deployed. An absolute path is used as-is.
-        $ca_file = preg_match('#^([A-Za-z]:[\\\\/]|/)#', $db_ssl_ca) === 1
-            ? $db_ssl_ca
-            : __DIR__ . '/../' . $db_ssl_ca;
-
-        if (!is_file($ca_file)) {
-            // Logged, never echoed: a missing certificate is about to
-            // break the connection below, and the visitor must not see
-            // filesystem paths. See the catch block at the end of file.
-            error_log('islaFIND: DB_SSL_CA is set but no certificate was found at ' . $ca_file);
-        }
-
-        $pdo_options[PDO::MYSQL_ATTR_SSL_CA] = $ca_file;
-        // Verify the server's certificate (on unless DB_SSL_VERIFY=0).
-        // Disabling it is only ever right for a throwaway test server:
-        // without verification, TLS still encrypts but no longer proves
-        // you are talking to the server you think you are.
-        $pdo_options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = env('DB_SSL_VERIFY', '1') !== '0';
-    }
-
-    // Create the PDO object (the connection itself).
-    $pdo = new PDO($dsn, $db_user, $db_pass, $pdo_options);
-
-    // --- 4. Self-healing schema ----------------------------------
+    // --- 3. Self-healing schema ----------------------------------
     // Runs the once-per-session guard below; defined here so the DDL
     // lives with the connection that owns it.
     isla_ensure_schema($pdo);

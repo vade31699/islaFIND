@@ -27,6 +27,11 @@ if (!isset($_SESSION['user_id'])) {
 // --- 3. Database connection ------------------------------------
 require_once __DIR__ . '/../include/db.php';
 
+// --- 3b. Upload storage ----------------------------------------
+// One seam for where pictures live, so the backend is changed in a
+// single file instead of here (see include/uploads.php).
+require_once __DIR__ . '/../include/uploads.php';
+
 // --- 4. Load the user's CURRENT row ----------------------------
 // We need the user's custom id (for the filename) and their
 // current profile_picture path (so the old file can be deleted).
@@ -94,10 +99,9 @@ if (!in_array($imgInfo['mime'], ['image/jpeg', 'image/png'], true)) {
 // tricks); the random suffix prevents collisions entirely.
 $ext      = $imgInfo['mime'] === 'image/png' ? 'png' : 'jpg';
 $filename = 'user_' . $user['user_id'] . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
-$target   = __DIR__ . '/uploads/' . $filename;
-
-// Move the uploaded temp file into the uploads folder.
-if (!move_uploaded_file($file['tmp_name'], $target)) {
+// Hand the bytes to the storage seam — the local uploads folder
+// unless the app is configured for a remote driver.
+if (!isla_upload_store($file['tmp_name'], $filename)) {
     flashRedirect('error', 'Could not save the file. Check the uploads folder permissions.');
 }
 
@@ -110,10 +114,7 @@ if (!move_uploaded_file($file['tmp_name'], $target)) {
 // never touched.
 $oldPath = $user['profile_picture'] ?? null;
 if ($oldPath !== null && $oldPath !== '') {
-    $oldFile = __DIR__ . '/uploads/' . basename($oldPath);
-    if (is_file($oldFile)) {
-        @unlink($oldFile);   // best-effort cleanup (ignore errors)
-    }
+    isla_upload_delete($oldPath);   // best-effort cleanup (see uploads.php)
 }
 
 // --- 11. Update the database reference --------------------------

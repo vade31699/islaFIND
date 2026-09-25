@@ -22,7 +22,40 @@
 // final_app.sql). They are SERVER-side on purpose: nothing about a
 // lockout is ever kept in $_SESSION, which is what the removed
 // session-based lockout got wrong (see the note in login.php).
+//
+// Host-dependent extras (both OFF by default, so WAMP is unaffected):
+//   - isla_send_security_headers() -> SEND_SECURITY_HEADERS=1
+//   - the database session handler -> SESSION_DRIVER=mysql
 // ============================================================
+
+// ------------------------------------------------------------------
+// Dependencies, loaded at include time.
+//
+// env.php gives us env(); session_store.php gives us the opt-in
+// database session handler. Both are dependency-free and idempotent
+// (every include in the app is require_once), and both must be
+// available BEFORE the first session_start() — which is here, not in
+// db.php, because login.php starts its session ten lines before it
+// includes the database.
+// ------------------------------------------------------------------
+require_once __DIR__ . '/env.php';
+require_once __DIR__ . '/session_store.php';
+
+// ------------------------------------------------------------------
+// Opt-in security headers.
+//
+// Apache sends these from public/.htaccess, so on WAMP they are
+// already covered and this is OFF. A host that ignores .htaccess
+// (nginx) sends none of them, so a deployment sets
+// SEND_SECURITY_HEADERS=1 and the app sends them itself. See README
+// ("Deploying") for which host needs which.
+//
+// This runs at include time because header() only works before any
+// output, and every page includes this file first.
+// ------------------------------------------------------------------
+if (env('SEND_SECURITY_HEADERS', '0') === '1') {
+    isla_send_security_headers();
+}
 
 // ------------------------------------------------------------------
 // Cookie-less session fallback (run at include time, BEFORE any
@@ -76,6 +109,11 @@ function sid_append(string $url): string
  *               mobile-preview iframe that does allow cookies.
  *  - Strict mode: PHP discards any session ID supplied by the
  *               client that it did not create itself.
+ *  - Storage:   opts the session into the database when
+ *               SESSION_DRIVER=mysql, so it survives a host that
+ *               rebuilds its container on every deploy (see
+ *               session_store.php). Otherwise files stay the
+ *               default and nothing about local behaviour changes.
  */
 function session_harden(): void
 {
@@ -105,6 +143,56 @@ function session_harden(): void
         'samesite' => $secure ? 'None' : 'Lax',
     ]);
     ini_set('session.use_strict_mode', '1');
+
+    // Where the session is actually STORED. A no-op unless
+    // SESSION_DRIVER=mysql, which is what a host with an ephemeral
+    // disk needs: file sessions are destroyed on every deploy and are
+    // not shared between instances. It must happen here rather than in
+    // db.php, because the handler has to be registered before
+    // session_start(). See session_store.php.
+    isla_session_register();
+}
+
+/**
+ * isla_send_security_headers()
+ * Sends the same hardening headers public/.htaccess sets, for hosts
+ * that never read an .htaccess (nginx). Toggle with
+ * SEND_SECURITY_HEADERS=1.
+ *
+ * The values are deliberately IDENTICAL to the Apache ones: two
+ * different sets depending on the host is how a page turns out to be
+ * "fixed" in one environment only.
+ *
+ * header(..., true) replaces rather than appends, so calling this
+ * twice is harmless — and a duplicated X-Frame-Options is worse than
+ * none, because browsers disagree on which copy wins.
+ *
+ * @return void
+ */
+function isla_send_security_headers(): void
+{
+    // Headers cannot be sent once output has started. This is called
+    // before output on every page, so getting here means a caller
+    // echoed early; log it rather than fail silently.
+    if (headers_sent()) {
+        error_log('islaFIND: security headers not sent (output already started)');
+        return;
+    }
+
+    // Stop browsers second-guessing a declared content type (also
+    // removes a class of "image that is really HTML" attack).
+    header('X-Content-Type-Options: nosniff', true);
+
+    // Never framed by another site. SAMEORIGIN, not DENY: the app may
+    // frame its own pages (mobile-preview shells do exactly that).
+    header('X-Frame-Options: SAMEORIGIN', true);
+
+    // Do not leak the full URL of one page to the next site.
+    header('Referrer-Policy: strict-origin-when-cross-origin', true);
+
+    // No flash/geolocation/camera by default; each page asks the
+    // browser for the single capability it needs.
+    header('Permissions-Policy: geolocation=(self), camera=(), microphone=()', true);
 }
 
 /**

@@ -106,6 +106,16 @@ if ($otherId > 0) {
 // --- 2. Mint a session for that user ----------------------------
 // Same session storage the web server uses, so the pages under test
 // see a normal logged-in visitor.
+//
+// That has to be taken literally when the app is configured with
+// SESSION_DRIVER=mysql: the server under test would read the session
+// from the database, so a session minted into PHP's file storage here
+// would be invisible to it and every "renders clean" check below would
+// fail as a signed-out redirect. Registering the same handler keeps
+// this test honest under either driver.
+require_once $incDir . '/session_store.php';
+isla_session_register();
+
 $sid = bin2hex(random_bytes(16));
 session_id($sid);
 session_start();

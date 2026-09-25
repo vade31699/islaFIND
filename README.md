@@ -222,11 +222,11 @@ host (Docker, CI, production) can override any key without touching the file.
 `notifications.php` (bell data) · `provider_reviews.php` (review records) ·
 `messenger_poll.php` (new-message polling)
 
-**Shared includes** — all in `include/`, never web-reachable
-
-`security.php` (sessions, CSRF, escaping, login throttling) ·
-`db.php` (PDO + schema self-check) ·
-`env.php` (.env loader) · `categories.php` (types, categories, barangays, map
+**Shared includes** — all in `include/`, never web-reachable`security.php` (sessions, CSRF, escaping, login throttling, opt-in headers) ·
+`db.php` (PDO + schema self-check) · `db_settings.php` (the one place that builds
+a connection — shared with the session store) · `env.php` (.env loader) ·
+`session_store.php` (opt-in MySQL session handler) · `uploads.php` (opt-in storage
+seam for profile pictures) · `categories.php` (types, categories, barangays, map
 centres) · `mailer.php` · `head_meta.php` (shared `<head>`) ·
 `notifications_bell.php`
 
@@ -331,23 +331,43 @@ them — but here is what is lost and where each rule should go instead:
 | Lost | Replacement |
 | ---- | ----------- |
 | Branded 404 / 403 | Use the host's own error-page setting, or accept the plain server page |
-| `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` | Send them from PHP in a shared include. Session cookie flags are **not** affected — `session_harden()` already sets HttpOnly / Secure / SameSite in code |
+| `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` | **Implemented** — set `SEND_SECURITY_HEADERS=1` and `security.php` sends all four. Session cookie flags are **not** affected: `session_harden()` already sets HttpOnly / Secure / SameSite in code |
 | Compression + static caching | Better handled by the platform's CDN or edge |
 | The deny on `.env`, the dump, `composer.*` | Not needed once the document root is `public/`: those files are outside it. **Never** point the document root at the project root |
 
-**Two things an ephemeral filesystem forces on this app.** A managed or
-single-instance host rebuilds its container on every deploy, so:
+**Host switches.** A host with no persistent disk and no `.htaccess` needs
+three settings changed. Every one of them defaults to the local WAMP
+behaviour, so none of this touches local development:
 
-1. **Sessions must leave the filesystem.** PHP's default file sessions
-   are destroyed on each deploy and are not shared between instances, so
-   visitors would be signed out at random. Move them to a database- or
-   cache-backed session handler before going live — the app has no
-   session handler of its own today.
-2. **Uploads must leave the filesystem.** `public/uploads/` holds profile
-   pictures; on an ephemeral disk they vanish on deploy. They belong in
-   object storage (the host's own bucket, or another S3-compatible
-   provider), with `upload_profile.php` writing there and the pages
-   reading from the stored URL.
+| Variable | Default | Set to | What it does |
+| -------- | ------- | ------ | ------------ |
+| `SESSION_DRIVER` | `files` | `mysql` | Keeps sessions in the `isla_sessions` table (created automatically) instead of PHP's files, so logins survive a deploy and are shared between instances. |
+| `SEND_SECURITY_HEADERS` | `0` | `1` | Sends the four hardening headers from PHP, for a host that ignores `.htaccess`. Leave `0` under Apache. |
+| `UPLOADS_URL_BASE` | empty | bucket/CDN origin | Makes every page render pictures from that origin. Read side only — see below. |
+
+**Sessions — done.** `SESSION_DRIVER=mysql` swaps in the handler in
+`include/session_store.php`. It stores PHP's own serialised payload in a
+MEDIUMBLOB and, because the app polls `messenger_poll.php` and
+`notifications.php` on short timers while the visitor is also loading
+pages, it holds a named lock (`GET_LOCK`) for the life of the request so
+two overlapping requests cannot clobber each other's session data — the
+same serialisation PHP's file handler gives for free. The lock is
+fail-open: it is never the reason a visitor cannot get in.
+
+**Headers — done.** `SEND_SECURITY_HEADERS=1` sends exactly the same
+four headers `public/.htaccess` sets.
+
+**Uploads — the read side is done, the write side is not.** Every page
+builds picture URLs through `isla_upload_url()` (`include/uploads.php`),
+so setting `UPLOADS_URL_BASE` moves reads to a bucket or CDN with no code
+change. Writing to object storage is the one piece still outstanding: it
+needs an S3 Signature Version 4 PUT, and that cannot be written honestly
+without a bucket and credentials to test against — its failure mode is a
+`403 SignatureDoesNotMatch` at the moment a user saves their picture.
+Until it is built, `UPLOADS_DRIVER=remote` fails the upload **loudly**
+and logs exactly what is missing, rather than reporting success. On a
+host with a persistent disk, uploads work unchanged and none of this
+applies.
 
 ---
 

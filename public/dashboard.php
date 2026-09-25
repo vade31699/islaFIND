@@ -31,6 +31,7 @@ if (!isset($_SESSION['user_id'])) {
 // --- 3. Database connection + shared category lists ------------
 require_once __DIR__ . '/../include/db.php';
 require_once __DIR__ . '/../include/categories.php';
+require_once __DIR__ . '/../include/uploads.php';
 
 // --- 4. Load the user's CURRENT row from the database ----------
 // (Not just the session copy, so profile picture, MFA state and
@@ -205,13 +206,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
             $errors['delete'] = 'Type DELETE to confirm, then submit again.';
         } else {
             // Avatar first — after the DELETE we can no longer resolve
-            // its filename. basename() keeps a stored value from ever
-            // escaping the uploads directory.
+            // its filename. The removal goes through the storage seam,
+            // which keeps a stored value from escaping the uploads
+            // directory and knows where the file actually lives.
             if (!empty($user['profile_picture'])) {
-                $picPath = __DIR__ . '/uploads/' . basename($user['profile_picture']);
-                if (is_file($picPath)) {
-                    @unlink($picPath);
-                }
+                isla_upload_delete($user['profile_picture']);
             }
 
             try {
@@ -443,7 +442,7 @@ foreach (preg_split('/\s+/', trim($user['full_name'])) as $part) {
     }
 }
 $avatarSrc = $user['profile_picture']
-    ? 'uploads/' . rawurlencode($user['profile_picture'])
+    ? isla_upload_url($user['profile_picture'])
     : null;
 $csrf = htmlspecialchars(csrf_token());
 
@@ -537,7 +536,7 @@ function feedCardHtml(array $p, array $categories, int $myId, string $csrf, arra
         ? $p['name']
         : $p['user_name'];
     $nameHtml = htmlspecialchars($name);
-    $pic      = $p['user_pic'] ? 'uploads/' . rawurlencode($p['user_pic']) : null;
+    $pic      = $p['user_pic'] ? isla_upload_url($p['user_pic']) : null;
     $jobs     = (int) ($p['completed_jobs'] ?? 0);   // hired + finished jobs
     $avgR     = round((float) ($p['avg_rating'] ?? 0), 1);
     $revN     = (int) ($p['review_count'] ?? 0);
@@ -1291,7 +1290,7 @@ include __DIR__ . '/../include/head_meta.php';
                                 $provName = htmlspecialchars($provName);
                                 // Photo + phone inherit from the account.
                                 $provPic  = $user['profile_picture']
-                                    ? 'uploads/' . rawurlencode($user['profile_picture']) : null;
+                                    ? isla_upload_url($user['profile_picture']) : null;
                                 $provPhone = htmlspecialchars($user['phone'] ?? '');
                                 $avgR = round((float) ($myProvider['avg_rating'] ?? 0), 1);
                                 $revN = (int) ($myProvider['review_count'] ?? 0);
@@ -1683,7 +1682,7 @@ include __DIR__ . '/../include/head_meta.php';
                                     : $saved['user_name'];
                                 $savedNameHtml = htmlspecialchars($savedName);
                                 $savedCat   = htmlspecialchars($providerCategories[$saved['selected_title']] ?? $saved['selected_title']);
-                                $savedPic   = $saved['user_pic'] ? 'uploads/' . rawurlencode($saved['user_pic']) : null;
+                                $savedPic   = $saved['user_pic'] ? isla_upload_url($saved['user_pic']) : null;
                                 $savedRating = round((float) ($saved['avg_rating'] ?? 0), 1);
                                 $savedReviews = (int) ($saved['review_count'] ?? 0);
                                 $savedPlace = trim(($saved['barangay'] ?? '') . ', ' . ($saved['municipality'] ?? ''), ', ');
