@@ -33,6 +33,14 @@ desktop.ini
 .vscode/
 *.swp
 
+# --- Stray second copy of the app ------------------------------
+# A clone of the GitHub repo parked INSIDE the project folder (e.g.
+# islaFIND/islaFIND) is not part of this project: it duplicates the
+# app, it is reachable through the web server, and a nested .git
+# confuses every git command run below it. Ignored so a `git add -A`
+# can never sweep 250 files of it into a commit.
+/islaFIND/
+
 # --- Local verification artifacts ------------------------------
 # screenshots/ holds the responsive-layout captures taken while
 # testing the shell by hand. Nothing in the app, the tests or the
