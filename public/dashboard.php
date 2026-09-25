@@ -17,7 +17,7 @@
 // ============================================================
 
 // --- 1. Harden the session cookie, then start the session ------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden(); // must run before session_start()
 session_start();
 
@@ -29,8 +29,8 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // --- 3. Database connection + shared category lists ------------
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/categories.php';
+require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/categories.php';
 
 // --- 4. Load the user's CURRENT row from the database ----------
 // (Not just the session copy, so profile picture, MFA state and
@@ -1014,7 +1014,7 @@ $homeNavActive = $activeTab === 'home' ? ' active' : '';
 // page ships the same head.
 $headTitle = 'Dashboard';
 $headDesc  = 'Your islaFIND home feed, listings, jobs and account settings.';
-include __DIR__ . '/head_meta.php';
+include __DIR__ . '/../include/head_meta.php';
 ?>
     <!-- Strength meter for the Change Password fields below -->
     <script src="password_strength.js"></script>
@@ -1029,7 +1029,7 @@ include __DIR__ . '/head_meta.php';
              menu pinned to the far right corner (bell sits LEFT of it) -->
         <div class="header-actions">
             <!-- Global notification bell (badge + dropdown panel) -->
-            <?php include __DIR__ . '/notifications_bell.php'; ?>
+            <?php include __DIR__ . '/../include/notifications_bell.php'; ?>
 
             <!-- Hamburger menu button -> opens the Settings hub -->
             <button type="button" class="header-icon header-menu-btn" id="menuBtn"

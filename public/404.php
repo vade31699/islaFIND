@@ -13,7 +13,7 @@
 // ============================================================
 
 // --- 1. Session (only to pick the right primary button) --------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden();
 session_start();
 
@@ -33,7 +33,7 @@ $headDesc  = 'That link is not part of islaFIND. Head back to the dashboard or t
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<?php include __DIR__ . '/head_meta.php'; ?>
+<?php include __DIR__ . '/../include/head_meta.php'; ?>
 </head>
 <body class="auth-body">
 

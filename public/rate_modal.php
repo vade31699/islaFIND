@@ -18,7 +18,7 @@
 // ============================================================
 
 // --- 1. Make the session-id helper available ------------------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 
 // --- 2. Redirect to the messenger ------------------------------
 // The JOB DONE / rating modal appears inside an active chat

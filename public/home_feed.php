@@ -16,13 +16,20 @@
 // drift between two implementations.
 // ============================================================
 
-// --- 1. Redirect to the real feed ----------------------------
+// --- 1. Make the session-id helper available ------------------
+// sid_append() lives in security.php, and it is what keeps the
+// session id on this redirect for clients that cannot store our
+// cookie. Without this include the line below would call an
+// undefined function and fatal instead of redirecting.
+require_once __DIR__ . '/../include/security.php';
+
+// --- 2. Redirect to the real feed ----------------------------
 // dashboard.php?tab=home opens the app shell on its Home panel,
 // where the recommendation engine renders the feed. The browser
 // performs this redirect instantly; the visitor never notices.
 header('Location: ' . sid_append('dashboard.php?tab=home'));
 
-// --- 2. Stop execution ---------------------------------------
+// --- 3. Stop execution ---------------------------------------
 // Nothing below this line should run — the Location header has
 // already told the browser where to go, so we exit immediately
 // to avoid sending any accidental output after the redirect.

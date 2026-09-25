@@ -15,7 +15,7 @@
 // ============================================================
 
 // --- 1. Harden the session cookie, then start the session ------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden();
 session_start();
 
@@ -26,8 +26,8 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // --- 3. Database connection + shared category lists ------------
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/categories.php';
+require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/categories.php';
 
 // --- 4. Load the current user ----------------------------------
 $stmt = $pdo->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');

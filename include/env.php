@@ -93,4 +93,6 @@ function env(string $key, string $default = ''): string
 
 // Load the project's .env as soon as this file is included, so no
 // caller can forget to. A missing .env is fine (see load_env).
-load_env(__DIR__ . '/.env');
+// This file lives in include/, so the .env it loads sits one level up
+// in the project root — the same place a host writes it.
+load_env(__DIR__ . '/../.env');

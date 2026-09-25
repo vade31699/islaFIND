@@ -12,7 +12,7 @@
 // ============================================================
 
 // --- 1. Harden the session cookie, then start the session ------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden(); // must run before session_start()
 session_start();
 
@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 // back in on it later) but is flagged inactive. Only needed when
 // a session actually exists.
 if (isset($_SESSION['user_id'])) {
-    require_once __DIR__ . '/db.php';
+    require_once __DIR__ . '/../include/db.php';
 
     $stmt = $pdo->prepare('UPDATE user_devices SET is_active = 0 WHERE session_id = :sid');
     $stmt->execute([':sid' => session_id()]);

@@ -16,8 +16,10 @@
 
 use PHPMailer\PHPMailer\PHPMailer;
 
-if (is_file(__DIR__ . '/vendor/autoload.php')) {
-    require_once __DIR__ . '/vendor/autoload.php';
+// This file lives in include/, so Composer's autoloader — which stays
+// in the project root next to composer.json — is one level up.
+if (is_file(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/../vendor/autoload.php';
 }
 
 # ------------------------------------------------------------------

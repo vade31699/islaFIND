@@ -130,12 +130,13 @@ try {
     // (the default) and this whole block does nothing.
     $db_ssl_ca = env('DB_SSL_CA', '');
     if ($db_ssl_ca !== '') {
-        // A relative path is resolved against the project root, so .env
-        // can say "certs/islandCA.pem" and the same file keeps working
+        // A relative path is resolved against the project root (this
+        // file lives in include/, hence the '../'), so .env can say
+        // "certs/islandCA.pem" and the same file keeps working
         // wherever the app is deployed. An absolute path is used as-is.
         $ca_file = preg_match('#^([A-Za-z]:[\\\\/]|/)#', $db_ssl_ca) === 1
             ? $db_ssl_ca
-            : __DIR__ . '/' . $db_ssl_ca;
+            : __DIR__ . '/../' . $db_ssl_ca;
 
         if (!is_file($ca_file)) {
             // Logged, never echoed: a missing certificate is about to

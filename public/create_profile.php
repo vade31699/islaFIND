@@ -14,7 +14,7 @@
 // ============================================================
 
 // --- 1. Harden the session cookie, then start the session ------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden();
 session_start();
 
@@ -25,8 +25,8 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // --- 3. Database connection + shared category lists ------------
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/categories.php';
+require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/categories.php';
 
 // --- 4. Load the current user ----------------------------------
 $stmt = $pdo->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');
@@ -102,7 +102,7 @@ $titleLabel = $providerCategories[$oldInput['selected_title']] ?? '';
 // page ships the same head.
 $headTitle = ($provider ? 'Edit' : 'Create') . ' Profile';
 $headDesc  = 'List your skill or business on the islaFIND directory for Bantayan Island.';
-include __DIR__ . '/head_meta.php';
+include __DIR__ . '/../include/head_meta.php';
 ?>
     <!-- No map library is loaded: the BUSINESS pin is placed on the
          real Google Maps in a separate tab (keyless), and the resulting

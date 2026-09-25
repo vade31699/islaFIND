@@ -4,6 +4,12 @@
 # notifications and uploaded profile pictures. Only the two public
 # entry points (the splash screen and the login/registration page)
 # are worth indexing, and even those exist purely to reach the app.
+#
+# This file is served from the web root (public/), so every path below
+# is relative to that folder. The developer utilities, the two smoke
+# tests, vendor/ and the SQL dump now live OUTSIDE the document root,
+# so they are not reachable at all — their rules are kept as insurance
+# in case one is ever copied into the web root again.
 
 User-agent: *
 Allow: /$

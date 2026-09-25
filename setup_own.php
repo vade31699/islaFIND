@@ -18,7 +18,7 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/include/db.php';
 // Test user who OWNS a listing, so their own profile appears in their feed.
 $pdo->exec("DELETE FROM user_interactions WHERE user_id IN (SELECT id FROM users WHERE email = 'own.test@example.com')");
 $pdo->exec("DELETE FROM service_contracts WHERE provider_id IN (SELECT id FROM users WHERE email = 'own.test@example.com') OR client_id IN (SELECT id FROM users WHERE email = 'own.test@example.com')");

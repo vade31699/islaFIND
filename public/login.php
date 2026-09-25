@@ -22,7 +22,7 @@
 // security.php provides session_harden() (HttpOnly + SameSite=None
 // cookie on localhost/HTTPS so it survives mobile-preview iframes,
 // strict session IDs) plus the CSRF helpers used below.
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden(); // must run before session_start()
 
 // --- 2. Start (or resume) the PHP session ----------------------
@@ -38,10 +38,10 @@ if (isset($_SESSION['user_id'])) {
 
 // --- 3. Connect to the database --------------------------------
 // db.php creates the shared $pdo connection object.
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/../include/db.php';
 
 // mailer.php loads .env and provides sendVerificationEmail().
-require_once __DIR__ . '/mailer.php';
+require_once __DIR__ . '/../include/mailer.php';
 
 // --- 4. Page state ---------------------------------------------
 // $errors:       field-name => message for every failed check
@@ -905,7 +905,7 @@ $trackClass = $initialPanel === 'register' ? ' show-register'
 // page ships the same head.
 $headTitle = 'Login / Sign Up';
 $headDesc  = 'Log in to islaFIND or create an account to list your skill or business on Bantayan Island.';
-include __DIR__ . '/head_meta.php';
+include __DIR__ . '/../include/head_meta.php';
 ?>
     <!-- Strength meter for the password fields on this page
          (sign-up + reset). Purely a hint: the server still owns

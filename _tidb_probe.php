@@ -26,7 +26,7 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
-require __DIR__ . '/db.php';
+require __DIR__ . '/include/db.php';
 
 $pass = 0;
 $fail = 0;

@@ -9,12 +9,12 @@
 // Harden the session cookie first (HttpOnly + SameSite=Lax + strict
 // IDs — see security.php), then start the session. Needed later by
 // login.php so it can remember that the user is logged in.
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden(); // must run before session_start()
 session_start();
 
 // Include the PDO connection from db.php ($pdo becomes available).
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/../include/db.php';
 
 /**
  * initializeAppEnvironment(PDO $pdo)
@@ -58,7 +58,7 @@ $appReadyJs = $appReady ? 'true' : 'false';
 // page ships the same head. A page only names itself here.
 $headTitle = 'Loading';
 $headDesc  = 'islaFIND is starting up — connecting to the Bantayan Island services directory.';
-include __DIR__ . '/head_meta.php';
+include __DIR__ . '/../include/head_meta.php';
 ?>
 </head>
 <body>

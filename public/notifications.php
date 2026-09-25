@@ -17,7 +17,7 @@
 // ============================================================
 
 // --- 1. Harden the session cookie, then start the session ------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden(); // must run before session_start()
 session_start();
 
@@ -30,7 +30,7 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // --- 3. Database connection -------------------------------------
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/../include/db.php';
 
 // --- 4. Load the user row (validates the stored session id) -----
 $stmt = $pdo->prepare('SELECT id FROM users WHERE id = :id LIMIT 1');

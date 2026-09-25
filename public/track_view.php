@@ -11,7 +11,7 @@
 // ============================================================
 
 // --- 1. Harden + start the session ------------------------------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden();
 session_start();
 
@@ -28,7 +28,7 @@ if ($providerId <= 0) {
 }
 
 // --- 4. Database connection -------------------------------------
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/../include/db.php';
 
 // --- 5. Load the provider (category is needed for affinity) ------
 $stmt = $pdo->prepare('SELECT id, selected_title FROM providers WHERE id = :id LIMIT 1');

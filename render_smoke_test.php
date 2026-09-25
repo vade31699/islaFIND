@@ -54,14 +54,20 @@ function check(string $label, bool $ok, string $detail = ''): void
     echo $detail !== '' ? "  ($detail)\n" : "\n";
 }
 
-if (!is_file(__DIR__ . '/dashboard.php')) {
-    fwrite(STDERR, "Run this from the project root (dashboard.php not found).\n");
+// The app is split in two: the pages and assets a browser may fetch
+// live in public/ (the web root), while the shared includes live in
+// include/ and are never web-reachable. $root is the project root,
+// $web the directory actually served, $incDir the shared includes.
+if (!is_file(__DIR__ . '/public/dashboard.php')) {
+    fwrite(STDERR, "Run this from the project root (public/dashboard.php not found).\n");
     exit(1);
 }
-$root = __DIR__;
+$root   = __DIR__;
+$web    = __DIR__ . '/public';
+$incDir = __DIR__ . '/include';
 
 // --- 1. Pick a user + a listing to render with ------------------
-require $root . '/db.php';
+require $incDir . '/db.php';
 
 $userId = $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
 if ($userId === false) {
@@ -116,7 +122,7 @@ $port    = random_int(20000, 60000);
 $base    = 'http://127.0.0.1:' . $port;
 $logFile = tempnam(sys_get_temp_dir(), 'isla_render_');
 $proc    = proc_open(
-    [PHP_BINARY, '-d', 'display_errors=1', '-d', 'error_reporting=E_ALL', '-S', '127.0.0.1:' . $port, '-t', $root],
+    [PHP_BINARY, '-d', 'display_errors=1', '-d', 'error_reporting=E_ALL', '-S', '127.0.0.1:' . $port, '-t', $web],
     [0 => ['file', $logFile, 'a'], 1 => ['file', $logFile, 'a'], 2 => ['file', $logFile, 'a']],
     $pipes,
     $root
@@ -579,7 +585,7 @@ if (!$ready) {
     // anybody for real.
     echo "\n-- Login throttling (failed-attempt counters)\n";
 
-    require_once $root . '/security.php';
+    require_once $incDir . '/security.php';
 
     $probeId = 'render-smoke@example.test';
     $probeIp = '203.0.113.9';

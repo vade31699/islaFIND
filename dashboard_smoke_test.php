@@ -86,11 +86,17 @@ function local_refs(string $html): array
 }
 
 // Guard: run from the project root so the relative paths line up.
-if (!is_file(__DIR__ . '/dashboard.php')) {
-    fwrite(STDERR, "Run this from the project root (dashboard.php not found).\n");
+// The app is split in two: the pages and assets a browser may fetch
+// live in public/ (the web root), while the shared includes live in
+// include/ and are never web-reachable. $root is the project root,
+// $web the directory actually served, $incDir the shared includes.
+if (!is_file(__DIR__ . '/public/dashboard.php')) {
+    fwrite(STDERR, "Run this from the project root (public/dashboard.php not found).\n");
     exit(1);
 }
-$root = __DIR__;
+$root   = __DIR__;
+$web    = __DIR__ . '/public';
+$incDir = __DIR__ . '/include';
 
 echo "\n=== islaFIND dashboard smoke test ===\n\n";
 
@@ -99,13 +105,13 @@ echo "\n=== islaFIND dashboard smoke test ===\n\n";
 // ============================================================
 echo "-- Static: links + assets resolve to real files\n";
 
-$dashboard = file_get_contents($root . '/dashboard.php');
+$dashboard = file_get_contents($web . '/dashboard.php');
 
 // The directory page is RETIRED: its listings live in the Home feed's
 // catalogue now, and nothing may link back to the old URL.
 check(
     'directory.php is gone from disk',
-    !is_file($root . '/directory.php')
+    !is_file($web . '/directory.php')
 );
 check(
     'no page links to the retired directory.php',
@@ -131,7 +137,7 @@ foreach (['dashboard.php' => $dashboard] as $name => $html) {
         if (!preg_match('/\.(?:php|css|js)$/i', $ref)) {
             continue;
         }
-        check("$name references an existing file: $ref", is_file($root . '/' . $ref));
+        check("$name references an existing file: $ref", is_file($web . '/' . $ref));
     }
 }
 
@@ -139,7 +145,9 @@ foreach (['dashboard.php' => $dashboard] as $name => $html) {
 if (preg_match_all('/require(?:_once)?\s+__DIR__\s*\.\s*[\'"]([^\'"]+)[\'"]/', $dashboard, $m)) {
     foreach ($m[1] as $inc) {
         $inc = ltrim($inc, '/\\');
-        check("dashboard.php includes an existing file: $inc", is_file($root . '/' . $inc));
+        // The captured path is relative to the PAGE (public/), because
+        // that is where dashboard.php sits — hence '../include/...'.
+        check("dashboard.php includes an existing file: $inc", is_file($web . '/' . $inc));
     }
 }
 
@@ -156,7 +164,7 @@ $headPages = [
     'messenger.php', 'create_profile.php', '404.php',
 ];
 foreach ($headPages as $page) {
-    $src = is_file($root . '/' . $page) ? (string) file_get_contents($root . '/' . $page) : '';
+    $src = is_file($web . '/' . $page) ? (string) file_get_contents($web . '/' . $page) : '';
     check(
         "$page renders the shared head",
         strpos($src, 'head_meta.php') !== false,
@@ -165,18 +173,18 @@ foreach ($headPages as $page) {
 }
 
 // The partial's own assets must exist, or every page 404s them.
-$headSrc = is_file($root . '/head_meta.php') ? (string) file_get_contents($root . '/head_meta.php') : '';
+$headSrc = is_file($incDir . '/head_meta.php') ? (string) file_get_contents($incDir . '/head_meta.php') : '';
 foreach (local_refs($headSrc) as $ref) {
     if (!preg_match('/\.(?:css|js|svg|webmanifest)$/i', $ref)) {
         continue;
     }
-    check("head_meta.php references an existing file: $ref", is_file($root . '/' . $ref));
+    check("head_meta.php references an existing file: $ref", is_file($web . '/' . $ref));
 }
 
 // A manifest that does not parse is worse than none: the browser
 // silently refuses to offer "add to home screen".
-$manifestRaw = is_file($root . '/manifest.webmanifest')
-    ? (string) file_get_contents($root . '/manifest.webmanifest')
+$manifestRaw = is_file($web . '/manifest.webmanifest')
+    ? (string) file_get_contents($web . '/manifest.webmanifest')
     : '';
 $manifest = json_decode($manifestRaw, true);
 check(
@@ -185,21 +193,21 @@ check(
 );
 
 // The branded error page + crawler rules.
-check('404.php exists', is_file($root . '/404.php'));
+check('404.php exists', is_file($web . '/404.php'));
 check(
     '404.php answers with an HTTP 404',
-    strpos((string) file_get_contents($root . '/404.php'), 'http_response_code(404)') !== false
+    strpos((string) file_get_contents($web . '/404.php'), 'http_response_code(404)') !== false
 );
-check('robots.txt exists', is_file($root . '/robots.txt'));
+check('robots.txt exists', is_file($web . '/robots.txt'));
 check(
     '.htaccess routes missing URLs to 404.php',
-    strpos((string) file_get_contents($root . '/.htaccess'), 'ErrorDocument 404 /404.php') !== false
+    strpos((string) file_get_contents($web . '/.htaccess'), 'ErrorDocument 404 /404.php') !== false
 );
 
 // Saved listings: the endpoint must gate on CSRF like every other
 // writer in the app, and the directory must offer the filter + sort.
-$saveSrc = is_file($root . '/save_listing.php')
-    ? (string) file_get_contents($root . '/save_listing.php')
+$saveSrc = is_file($web . '/save_listing.php')
+    ? (string) file_get_contents($web . '/save_listing.php')
     : '';
 check('save_listing.php exists', $saveSrc !== '');
 check(
@@ -303,8 +311,8 @@ check(
 );
 check(
     'style.css matches the seven-panel track',
-    strpos((string) file_get_contents($root . '/style.css'), 'width: 700%') !== false
-        && strpos((string) file_get_contents($root . '/style.css'), '.dash-slider-track.show-saved') !== false
+    strpos((string) file_get_contents($web . '/style.css'), 'width: 700%') !== false
+        && strpos((string) file_get_contents($web . '/style.css'), '.dash-slider-track.show-saved') !== false
 );
 check(
     'save_listing.php can return to the saved panel',
@@ -325,8 +333,8 @@ check(
 );
 check(
     'the retired maps_integration.js is gone',
-    !is_file($root . '/maps_integration.js')
-        && !is_file($root . '/maps_integration_test.js')
+    !is_file($web . '/maps_integration.js')
+        && !is_file($web . '/maps_integration_test.js')
 );
 check(
     'the route button says what it does (Get Directions)',
@@ -346,7 +354,7 @@ check(
         && preg_match('/mapHint\.hidden = false;/', $dashboard)
         && preg_match('/mapHint\.hidden = true;/', $dashboard)
 );
-$cssSrc = (string) file_get_contents($root . '/style.css');
+$cssSrc = (string) file_get_contents($web . '/style.css');
 check(
     'style.css styles the route hint',
     strpos($cssSrc, '.route-hint {') !== false
@@ -454,18 +462,18 @@ check(
 );
 check(
     'the profile pin preview opens the SPOT, not a route',
-    strpos((string) file_get_contents($root . '/maps_pinning.js'), 'maps/search/?api=1&query=') !== false
+    strpos((string) file_get_contents($web . '/maps_pinning.js'), 'maps/search/?api=1&query=') !== false
 );
 
 // The password meter (register / reset / change password).
-check('password_strength.js exists', is_file($root . '/password_strength.js'));
+check('password_strength.js exists', is_file($web . '/password_strength.js'));
 check(
     'dashboard.php loads the password strength meter',
     strpos($dashboard, 'password_strength.js') !== false
 );
 check(
     'login.php loads the password strength meter',
-    strpos((string) file_get_contents($root . '/login.php'), 'password_strength.js') !== false
+    strpos((string) file_get_contents($web . '/login.php'), 'password_strength.js') !== false
 );
 
 // Login throttling. render_smoke_test.php proves the counters behave
@@ -473,8 +481,8 @@ check(
 // wired to them at all — and, just as important, WHERE. The gate has
 // to run before the password is verified, or a brute-force loop keeps
 // guessing while it waits and the throttle does nothing.
-$loginSrc = (string) file_get_contents($root . '/login.php');
-$secSrc   = (string) file_get_contents($root . '/security.php');
+$loginSrc = (string) file_get_contents($web . '/login.php');
+$secSrc   = (string) file_get_contents($incDir . '/security.php');
 check(
     'security.php provides the throttle helpers (counters in the database)',
     strpos($secSrc, 'function login_throttle_wait(') !== false
@@ -502,7 +510,7 @@ check(
 );
 check(
     'the schema ships the table (runtime creation + SQL dump)',
-    strpos((string) file_get_contents($root . '/db.php'), 'CREATE TABLE IF NOT EXISTS login_attempts') !== false
+    strpos((string) file_get_contents($incDir . '/db.php'), 'CREATE TABLE IF NOT EXISTS login_attempts') !== false
         && strpos((string) file_get_contents($root . '/final_app.sql'), 'CREATE TABLE IF NOT EXISTS login_attempts') !== false
 );
 
@@ -556,7 +564,7 @@ $port    = random_int(20000, 60000);
 $base    = 'http://127.0.0.1:' . $port;
 $logFile = tempnam(sys_get_temp_dir(), 'isla_srv_');
 $proc    = proc_open(
-    [PHP_BINARY, '-S', '127.0.0.1:' . $port, '-t', $root],
+    [PHP_BINARY, '-S', '127.0.0.1:' . $port, '-t', $web],
     [0 => ['file', $logFile, 'a'], 1 => ['file', $logFile, 'a'], 2 => ['file', $logFile, 'a']],
     $pipes,
     $root

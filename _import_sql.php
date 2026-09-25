@@ -37,7 +37,7 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
-require_once __DIR__ . '/env.php';
+require_once __DIR__ . '/include/env.php';
 
 // ------------------------------------------------------------
 // split_sql()

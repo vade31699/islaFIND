@@ -13,7 +13,7 @@
 // ============================================================
 
 // --- 1. Harden the session cookie, then start the session ------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden();
 session_start();
 
@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 }
 
 // --- 4. Database connection ------------------------------------
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/../include/db.php';
 
 // --- 5. Collect + validate the fields ---------------------------
 $providerId = (int) ($_POST['provider_id'] ?? 0);

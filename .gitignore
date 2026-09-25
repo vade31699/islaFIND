@@ -19,8 +19,10 @@
 # --- User uploads ---------------------------------------------
 # Profile pictures belong to the accounts that uploaded them, not
 # to the repository. The folder's .htaccess rule IS committed.
-/uploads/*
-!/uploads/.htaccess
+# uploads/ sits inside the web root (public/), so the pattern is
+# anchored there.
+/public/uploads/*
+!/public/uploads/.htaccess
 
 # --- Logs and OS clutter --------------------------------------
 *.log

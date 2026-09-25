@@ -13,7 +13,7 @@
 // ============================================================
 
 // --- 1. Harden the session cookie, then start the session ------
-require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/../include/security.php';
 session_harden(); // must run before session_start()
 session_start();
 
@@ -24,7 +24,7 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // --- 3. Database connection ------------------------------------
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/../include/db.php';
 
 // --- 4. Load the current user ----------------------------------
 $stmt = $pdo->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');
@@ -438,7 +438,7 @@ if ($otherUser) {
 // page ships the same head.
 $headTitle = 'Messenger';
 $headDesc  = 'Chat with islaFIND clients and providers about a job or a booking.';
-include __DIR__ . '/head_meta.php';
+include __DIR__ . '/../include/head_meta.php';
 ?>
 </head>
 <body class="chat-body">

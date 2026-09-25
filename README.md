@@ -16,10 +16,12 @@ hand-written JavaScript files.
 
 - [Features](#features)
 - [Tech stack](#tech-stack)
+- [Project layout](#project-layout)
 - [Getting started (WAMP)](#getting-started-wamp)
 - [Configuration](#configuration)
 - [Project map](#project-map)
 - [Testing](#testing)
+- [Deploying](#deploying)
 - [Developer utilities](#developer-utilities)
 - [Security notes](#security-notes)
 - [Data model](#data-model)
@@ -132,9 +134,32 @@ No build step, no bundler, no JS framework: open the folder in WAMP and it runs.
 
 ---
 
+## Project layout
+
+The repository is split so that **only `public/` is ever served**:
+
+| Folder | Holds | Web-reachable? |
+| ------ | ----- | -------------- |
+| `public/` | The document root: every page (`index.php`, `login.php`, `dashboard.php`, `messenger.php`, `create_profile.php`, `404.php`), every POST handler and JSON endpoint, plus `style.css`, the hand-written `.js` files, `img/`, `uploads/`, `manifest.webmanifest`, `robots.txt` and the `.htaccess` that hardens the web root. | Yes — this is the document root |
+| `include/` | The shared PHP includes: `db.php`, `env.php`, `security.php`, `categories.php`, `mailer.php`, `head_meta.php`, `notifications_bell.php`. Pages reach them with `require_once __DIR__ . '/../include/x.php'`. | No |
+| project root | Configuration and tooling that must never be fetched: `.env`, `certs/`, `composer.json`/`composer.lock`, `vendor/`, `final_app.sql`, the two smoke tests and the CLI-only developer utilities. | No |
+
+That split is what keeps the credentials in `.env` (and the CA
+certificate, and the database dump) out of reach of a browser: they are
+not merely *denied* by a rule, they are outside the document root
+altogether. The project root also carries a small `.htaccess` whose only
+job is to forward requests into `public/`, which is what keeps the local
+WAMP URL below working.
+
+---
+
 ## Getting started (WAMP)
 
 1. **Put the project in the web root** — e.g. `C:\wamp64\www\islaFIND`.
+   The root `.htaccess` forwards into `public/`, so nothing else is needed
+   for the URL below to work. (An Apache vhost whose `DocumentRoot` points
+   straight at `...\islaFIND\public` is the tidier equivalent, and matches
+   how a host is configured.)
 2. **Create the database.** Open HeidiSQL (or phpMyAdmin) and run
    `final_app.sql` (`File → Run SQL file…`). It creates the `final_app`
    database and every table. The script only ever uses
@@ -147,8 +172,9 @@ No build step, no bundler, no JS framework: open the folder in WAMP and it runs.
 6. **Register an account.** If SMTP is not configured yet, the verification code
    is shown on screen instead of emailed, so you can still finish sign-up.
 
-> The **uploads** folder must be writable by Apache (WAMP sets this up by
-> default). `uploads/.htaccess` blocks script execution inside it.
+> The **uploads** folder — now `public/uploads/` — must be writable by
+> Apache (WAMP sets this up by default). `public/uploads/.htaccess` blocks
+> script execution inside it.
 
 ---
 
@@ -172,30 +198,31 @@ host (Docker, CI, production) can override any key without touching the file.
 
 ## Project map
 
-**Pages**
+**Pages** — all in `public/`
 
 | File | What it is |
 | ---- | ---------- |
-| `index.php` | Splash screen: readiness checks + progress animation → login. |
-| `login.php` | Login, sign-up, verify-code, forgot-password, reset, MFA panels. |
-| `dashboard.php` | The signed-in app shell: Home feed (rails + the **All Listings** results view with search, filters and sort), Settings, Profile, islaFIND Profile, Privacy & Security, My Jobs, Saved Listings. |
-| `messenger.php` | Inbox + chat threads, hire requests, job state, rating prompt. |
-| `create_profile.php` | Create / edit an islaFIND listing (type, title, address, pin). |
-| `404.php` | Branded "page not found" screen (wired up in `.htaccess`). |
+| `public/index.php` | Splash screen: readiness checks + progress animation → login. |
+| `public/login.php` | Login, sign-up, verify-code, forgot-password, reset, MFA panels. |
+| `public/dashboard.php` | The signed-in app shell: Home feed (rails + the **All Listings** results view with search, filters and sort), Settings, Profile, islaFIND Profile, Privacy & Security, My Jobs, Saved Listings. |
+| `public/messenger.php` | Inbox + chat threads, hire requests, job state, rating prompt. |
+| `public/create_profile.php` | Create / edit an islaFIND listing (type, title, address, pin). |
+| `public/404.php` | Branded "page not found" screen (wired up in `public/.htaccess`). |
+| `public/home_feed.php` · `public/rate_modal.php` | Legacy compatibility wrappers from the original plan: thin redirects into the dashboard's Home tab and the messenger's rating flow. No logic is duplicated. |
 
-**Handlers** (POST endpoints)
+**Handlers** (POST endpoints) — all in `public/`
 
 `logout.php` · `save_profile.php` · `delete_profile.php` · `upload_profile.php` ·
 `send_message.php` · `hire_action.php` · `rate_service.php` ·
 `delete_conversations.php` · `delete_message.php` · `save_listing.php` ·
 `track_view.php`
 
-**JSON endpoints**
+**JSON endpoints** — all in `public/`
 
 `notifications.php` (bell data) · `provider_reviews.php` (review records) ·
 `messenger_poll.php` (new-message polling)
 
-**Shared includes & assets**
+**Shared includes** — all in `include/`, never web-reachable
 
 `security.php` (sessions, CSRF, escaping, login throttling) ·
 `db.php` (PDO + schema self-check) ·
@@ -203,14 +230,16 @@ host (Docker, CI, production) can override any key without touching the file.
 centres) · `mailer.php` · `head_meta.php` (shared `<head>`) ·
 `notifications_bell.php`
 
-**Root configuration** — `.htaccess` (branded 404, hardening headers,
-compression) · `manifest.webmanifest` (installable app) · `robots.txt` ·
-`.gitignore` · `composer.json`
-
-`style.css` · `busy.js` (loading states) · `profile_script.js` ·
-`maps_pinning.js` · `messenger.js` ·
+**Web root, configuration and assets** (in `public/`) — `.htaccess` (branded
+404, hardening headers, compression) · `manifest.webmanifest` (installable
+app) · `robots.txt` · `style.css` · `busy.js` (loading states) ·
+`profile_script.js` · `maps_pinning.js` · `messenger.js` ·
 `messenger_live.js` · `notifications.js` · `message_delete.js` ·
-`password_strength.js`
+`password_strength.js` · `img/` · `uploads/`
+
+**Project root** — `.htaccess` (forwards local requests into `public/`) ·
+`.gitignore` · `.gitattributes` · `composer.json` / `composer.lock` ·
+`final_app.sql` · `certs/`
 
 ---
 
@@ -267,6 +296,61 @@ afterwards.
 
 ---
 
+## Deploying
+
+The deploy target's **document root must be `public/`**. That one setting
+is what keeps `.env`, `certs/`, `vendor/` and the SQL dump outside the
+web root — no code change is needed for it.
+
+The stack is deliberately plain (no framework), and the host is a PHP
+runtime:
+
+| Host setting | Value |
+| ------------ | ----- |
+| Document root | `public` |
+| PHP | 8.2–8.5 (the app requires >= 8.0; 8.3 is the development version) |
+| Build command | `composer install --no-dev` |
+| Environment variables | See below |
+
+**Environment variables.** `include/env.php` reads the **process
+environment first** and only then `.env`, so a host that injects its
+variables (the normal way to configure a deployment) needs no code
+change — but the names must match the ones the app actually reads:
+
+| Key | Notes |
+| --- | ----- |
+| `DB_HOST` `DB_PORT` `DB_NAME` `DB_USER` `DB_PASS` | Note `DB_NAME` / `DB_USER` / `DB_PASS` — **not** the `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD` spelling some platforms inject by default |
+| `DB_SSL_CA` | **Required** for a managed MySQL (TiDB Cloud Serverless, PlanetScale, …), which refuses plaintext. Set it to `certs/lets-encrypt-roots.pem` — that file is committed, so no certificate download is needed. Relative paths resolve against the project root |
+| `DB_SSL_VERIFY` | Leave at `1` (the default) |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `MAIL_FROM` `MAIL_FROM_NAME` `SMTP_ENCRYPTION` | The mail settings |
+
+**On a server that ignores `.htaccess`** (nginx), the rules in
+`public/.htaccess` do not apply. Nothing breaks — the app runs without
+them — but here is what is lost and where each rule should go instead:
+
+| Lost | Replacement |
+| ---- | ----------- |
+| Branded 404 / 403 | Use the host's own error-page setting, or accept the plain server page |
+| `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` | Send them from PHP in a shared include. Session cookie flags are **not** affected — `session_harden()` already sets HttpOnly / Secure / SameSite in code |
+| Compression + static caching | Better handled by the platform's CDN or edge |
+| The deny on `.env`, the dump, `composer.*` | Not needed once the document root is `public/`: those files are outside it. **Never** point the document root at the project root |
+
+**Two things an ephemeral filesystem forces on this app.** A managed or
+single-instance host rebuilds its container on every deploy, so:
+
+1. **Sessions must leave the filesystem.** PHP's default file sessions
+   are destroyed on each deploy and are not shared between instances, so
+   visitors would be signed out at random. Move them to a database- or
+   cache-backed session handler before going live — the app has no
+   session handler of its own today.
+2. **Uploads must leave the filesystem.** `public/uploads/` holds profile
+   pictures; on an ephemeral disk they vanish on deploy. They belong in
+   object storage (the host's own bucket, or another S3-compatible
+   provider), with `upload_profile.php` writing there and the pages
+   reading from the stored URL.
+
+---
+
 ## Developer utilities
 
 Command-line only (`PHP_SAPI !== 'cli'` → the web request gets a 404, because
@@ -308,15 +392,19 @@ Implemented everywhere, not per page:
   JS strings go through `js_string()`; free-text fields reject markup at input
   time as a second layer.
 - **Uploads** — real image validation with `getimagesize()`, 5 MB cap, random
-  filename, old file removed, and `.htaccess` in `uploads/` blocking execution.
+  filename, old file removed, and `.htaccess` in `public/uploads/` blocking
+  execution.
 - **Authorization** — ownership is re-checked server-side on every action
   (edit/delete a listing, revoke a device, accept a hire, delete a message).
 - **Verified reviews** — a review requires a `completed` contract owned by the
   submitter, one review per contract.
 - **Privacy** — profile phones are never rendered on public cards; contact
   details are shared inside a chat only after the provider accepts the request.
-- **Secrets** — credentials live in `.env` only, and `.htaccess` denies access
-  to `.env`, the SQL dump and other housekeeping files.
+- **Secrets** — credentials live in `.env` only, and that file sits *outside*
+  the document root, so it is unreachable over HTTP on any server whether or
+  not that server honours `.htaccess`. `public/.htaccess` additionally denies
+  `.env`, the SQL dump and the composer files by name, as a second net if one
+  is ever copied into the web root.
 
 Deliberately **not** done yet:
 

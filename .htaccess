@@ -1,84 +1,49 @@
 # ============================================================
-# .htaccess — Apache configuration for islaFIND (WAMP)
-# Optional: every rule here is a nicety, not a dependency. On a
-# server that ignores .htaccess (nginx, or Apache with
-# AllowOverride None) the app still runs — it simply loses the
-# branded 404 screen and the extra hardening below.
+# .htaccess — PROJECT ROOT (not the document root)
 #
-# Requires the Apache modules: mod_rewrite (bundled and enabled by
-# default in WAMP), mod_headers, mod_deflate and mod_expires.
+# The application's real web root is public/. Only public/ is meant
+# to be served; everything beside it — include/, certs/, vendor/,
+# final_app.sql, composer.json and .env — must never be reachable
+# over HTTP.
+#
+# This file exists for ONE reason: local WAMP convenience. Where the
+# project folder itself is the served directory (http://localhost/
+# islaFIND/), the rewrite below forwards every request into public/,
+# so the app answers at exactly the URL it always has:
+#
+#     http://localhost/islaFIND/index.php
+#
+# On Laravel Cloud the web server is nginx, which ignores .htaccess
+# entirely, so the document root must be set to public/ there. This
+# file then has no effect at all — which is fine, because with the
+# document root on public/ the private files are already outside it.
+#
+# The rules that actually harden the app (branded 404, security
+# headers, compression, caching) live in public/.htaccess.
 # ============================================================
 
-# --- 1. Branded error pages -------------------------------------
-# A missing URL gets the app's own 404 screen instead of Apache's
-# bare "Not Found" page. 404.php is deliberately standalone.
-ErrorDocument 404 /404.php
-ErrorDocument 403 /404.php
+# --- 1. Forward everything into the real web root ---------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
 
-# --- 2. Never serve the private/housekeeping files --------------
-# Secrets (.env), the database dump, the composer files and the PHP
-# session data must never be downloadable. uploads/.htaccess already
-# blocks execution inside the uploads folder; these rules cover the
-# project root.
-<FilesMatch "^(\.env(\..*)?|composer\.(json|lock)|final_app\.sql|.*\.(md|log|ini|bak))$">
+    # Deliberately unconditional. Every file that should be servable
+    # now lives under public/, so letting an existing root-level file
+    # pass through would hand out README.md, final_app.sql and the
+    # composer files.
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# --- 2. Safety net if mod_rewrite is unavailable ----------------
+# Without the rewrite above the app is not reachable from this
+# directory at all, so the only thing left to protect is the
+# secrets themselves. Deny them by name rather than relying on the
+# rewrite.
+<FilesMatch "^\.env(\..*)?$">
+    Require all denied
+</FilesMatch>
+<FilesMatch "^final_app\.sql$">
     Require all denied
 </FilesMatch>
 
-# --- 3. Hardening headers --------------------------------------
-<IfModule mod_headers.c>
-    # Stop browsers from second-guessing a declared content type
-    # (also removes a whole class of "image that is really HTML"
-    # attacks on uploaded files).
-    Header set X-Content-Type-Options "nosniff"
-
-    # The app is never meant to be framed by another site. (It is
-    # fine inside its OWN pages, hence SAMEORIGIN rather than DENY.)
-    Header set X-Frame-Options "SAMEORIGIN"
-
-    # Do not leak the full URL of one page to the next site.
-    Header set Referrer-Policy "strict-origin-when-cross-origin"
-
-    # No flash/geolocation/camera for anyone by default; each page
-    # asks for the one capability it needs (geolocation on the
-    # profile form) with the browser's own prompt.
-    Header set Permissions-Policy "geolocation=(self), camera=(), microphone=()"
-</IfModule>
-
-# NOTE on a Content-Security-Policy: deliberately NOT set here.
-# Every page uses inline <script> blocks, inline onsubmit="..."
-# handlers and a couple of inline styles, so a strict CSP would break
-# the app outright. Adding one is a real hardening step, but only
-# after those inline scripts are externalised AND nonce-based — see
-# the notes in README.md ("Security" section).
-
-# NOTE on session cookies: HttpOnly / Secure / SameSite are set in
-# CODE by session_harden() (security.php) before every
-# session_start(), and Apache must not append a second SameSite to
-# that header — a duplicate attribute makes browsers drop the
-# cookie, which would break login inside mobile-preview iframes.
-
-# --- 5. Compression + caching for static assets ----------------
-<IfModule mod_deflate.c>
-    AddOutputFilterByType DEFLATE text/html text/css text/plain text/xml application/javascript application/json image/svg+xml
-</IfModule>
-
-<IfModule mod_expires.c>
-    ExpiresActive On
-
-    # style.css and the .js files are edited constantly while the app
-    # is being worked on, and a browser holding yesterday's script is
-    # a genuinely confusing bug ("I fixed it but nothing changed").
-    # They are therefore revalidated on every load — the browser still
-    # gets a 304 when nothing changed, so the cost is one round trip.
-    ExpiresByType text/css               "access plus 0 seconds"
-    ExpiresByType application/javascript "access plus 0 seconds"
-
-    # Uploaded photos and the logo never change under the same name,
-    # so they can be cached hard.
-    ExpiresByType image/svg+xml       "access plus 1 month"
-    ExpiresByType image/jpeg          "access plus 1 month"
-    ExpiresByType image/png           "access plus 1 month"
-</IfModule>
-
-# --- 6. Directory listings off ----------------------------------
+# --- 3. Directory listings off ----------------------------------
 Options -Indexes
