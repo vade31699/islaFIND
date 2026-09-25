@@ -39,11 +39,18 @@ function isla_db_pdo(): PDO
 {
     // WAMP's defaults are the fallbacks, so a fresh checkout with no
     // .env still runs against a local MySQL.
+    //
+    // A host may inject its OWN names for the same values — Laravel
+    // Cloud provisions a database and injects DB_DATABASE,
+    // DB_USERNAME and DB_PASSWORD. Reading those as second choices
+    // means attaching a database needs no copy-pasting of one set of
+    // values into the other's variable names. The app's own names
+    // still win, so .env stays authoritative wherever it is used.
     $host = env('DB_HOST', 'localhost');
     $port = env('DB_PORT', '3306');
-    $name = env('DB_NAME', 'final_app');
-    $user = env('DB_USER', 'root');
-    $pass = env('DB_PASS', '');
+    $name = env('DB_NAME', env('DB_DATABASE', 'final_app'));
+    $user = env('DB_USER', env('DB_USERNAME', 'root'));
+    $pass = env('DB_PASS', env('DB_PASSWORD', ''));
 
     // utf8mb4 guarantees full UTF-8 support (emoji, accents, etc.).
     $dsn = 'mysql:host=' . $host . ';port=' . $port . ';dbname=' . $name . ';charset=utf8mb4';
