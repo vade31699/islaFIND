@@ -1,0 +1,9 @@
+# ============================================================
+# .gitattributes — how Git should treat specific files
+# ============================================================
+
+# Certificates are not prose: keep their bytes exactly as issued.
+# Without this, `core.autocrlf` rewrites their line endings on
+# checkout (CRLF on Windows, LF on Linux), which would mean the file
+# a TLS connection loads is never quite the file that was committed.
+*.pem -text

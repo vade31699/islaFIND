@@ -233,7 +233,21 @@ if ($ssl_ca !== '') {
 echo "\n--- Connection ---\n";
 echo 'server: ' . $host . ':' . $port . "\n";
 echo 'user:   ' . $user . ' (password ' . ($pass !== '' ? 'set' : 'empty') . ")\n";
-echo 'tls:    ' . ($ca_file !== '' ? "on, CA $ca_file" : 'off (plaintext, DB_SSL_CA empty)') . "\n";
+// TLS. A managed MySQL (TiDB Cloud Serverless, for one) REFUSES
+// plaintext connections outright — this is not optional there. With a
+// CA the server is verified; DB_SSL_VERIFY=0 asks for encryption
+// WITHOUT verification, which is what you need while the provider's
+// CA is not at hand yet. A local WAMP needs neither.
+$verify  = env('DB_SSL_VERIFY', '1') !== '0';
+$use_tls = $ca_file !== '' || !$verify;
+
+if ($use_tls) {
+    echo 'tls:    ' . ($ca_file !== ''
+        ? 'on, CA ' . $ca_file . ($verify ? ' (verified)' : ' (NOT verified)')
+        : 'on, no CA — encrypted but NOT verified') . "\n";
+} else {
+    echo "tls:    off (plaintext; DB_SSL_CA empty)\n";
+}
 
 $link = mysqli_init();
 if ($link === false) {
@@ -249,6 +263,14 @@ if ($ca_file !== '') {
 // creates it (CREATE DATABASE IF NOT EXISTS) and then USEs it, so
 // connecting to it up front would fail on a fresh server — exactly
 // the case this script exists for.
+$ssl_flags = 0;
+if ($use_tls) {
+    $ssl_flags = MYSQLI_CLIENT_SSL;
+    if (!$verify) {
+        $ssl_flags |= MYSQLI_CLIENT_SSL_DONT_VERIFY_SERVER_CERT;
+    }
+}
+
 $connected = @mysqli_real_connect(
     $link,
     $host,
@@ -257,11 +279,22 @@ $connected = @mysqli_real_connect(
     null,
     $port,
     null,
-    $ca_file !== '' ? MYSQLI_CLIENT_SSL : 0
+    $ssl_flags
 );
 
 if (!$connected) {
-    fwrite(STDERR, "\nConnection FAILED: " . mysqli_connect_error() . "\n");
+    $error = mysqli_connect_error();
+    fwrite(STDERR, "\nConnection FAILED: " . $error . "\n");
+
+    // The most common wall on a managed server, and the message the
+    // server sends for it does not say what to do about it.
+    if (stripos($error, 'insecure transport') !== false
+        || stripos($error, 'SSL') !== false) {
+        fwrite(STDERR, "This server requires TLS. Point DB_SSL_CA at a CA certificate\n"
+            . "(certs/lets-encrypt-roots.pem works for TiDB Cloud Starter —\n"
+            . "its certificates are issued by Let's Encrypt), or set\n"
+            . "DB_SSL_VERIFY=0 to encrypt without verification.\n");
+    }
     exit(1);
 }
 
