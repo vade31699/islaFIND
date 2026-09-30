@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.vade31699.islafind",
+        "sha256_cert_fingerprints": ["BF:25:58:13:29:FC:A6:14:E3:C5:46:C1:A0:6E:DE:57:0E:0E:8A:28:B1:20:1B:96:A6:6A:B4:AF:74:AB:38:4A"]
+      }
+    }]
