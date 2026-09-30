@@ -205,12 +205,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
             // gesture, not a spelling test.
             $errors['delete'] = 'Type DELETE to confirm, then submit again.';
         } else {
-            // Avatar first — after the DELETE we can no longer resolve
-            // its filename. The removal goes through the storage seam,
-            // which keeps a stored value from escaping the uploads
-            // directory and knows where the file actually lives.
+            // Every file goes FIRST, while the names are still
+            // readable: the account avatar, plus each listing's own
+            // cover and album photos. After the DELETE below those rows
+            // are gone and nothing in the database points at the files
+            // again, so anything skipped here is an orphan in uploads/
+            // that nobody can ever find or clean up. The removals go
+            // through the storage seam, which keeps a stored value from
+            // escaping the uploads directory and knows where the files
+            // actually live — and which is best-effort, so a file that is
+            // already gone never blocks the account from being deleted.
             if (!empty($user['profile_picture'])) {
-                isla_upload_delete($user['profile_picture']);
+                isla_upload_delete((string) $user['profile_picture']);
+            }
+
+            // A LEFT JOIN so a listing with no album still yields its
+            // cover (one row, album_pic NULL) and one with an album
+            // yields every file; the empty checks below skip the NULLs.
+            $stmt = $pdo->prepare(
+                'SELECT p.profile_picture AS cover_pic, a.image_name AS album_pic
+                   FROM providers p
+                   LEFT JOIN provider_album_images a ON a.provider_id = p.id
+                  WHERE p.user_id = :uid'
+            );
+            $stmt->execute([':uid' => $user['id']]);
+
+            foreach ($stmt->fetchAll() as $ownedFile) {
+                if (!empty($ownedFile['cover_pic'])) {
+                    isla_upload_delete((string) $ownedFile['cover_pic']);
+                }
+                if (!empty($ownedFile['album_pic'])) {
+                    isla_upload_delete((string) $ownedFile['album_pic']);
+                }
             }
 
             try {
@@ -528,7 +554,7 @@ if (!$devices) {
 // same listing can also sit in a rail — save_listing.php returns the
 // visitor to #listing-N after a toggle, and an anchor that matched two
 // cards would scroll to whichever came first.
-function feedCardHtml(array $p, array $categories, int $myId, string $csrf, array $savedIds = [], bool $catalogue = false): string
+function feedCardHtml(array $p, array $categories, int $myId, string $csrf, array $savedIds = [], bool $catalogue = false, array $albums = []): string
 {
     $catLabel = htmlspecialchars($categories[$p['selected_title']] ?? $p['selected_title']);
     // Business listings keep their own name; individuals use the account name.
@@ -536,7 +562,12 @@ function feedCardHtml(array $p, array $categories, int $myId, string $csrf, arra
         ? $p['name']
         : $p['user_name'];
     $nameHtml = htmlspecialchars($name);
-    $pic      = $p['user_pic'] ? isla_upload_url($p['user_pic']) : null;
+    // A listing can carry a picture of its OWN (providers.profile_picture,
+    // set from Settings -> islaFIND Profile); when it has none the account
+    // avatar is shown, exactly as before that column existed. The fallback
+    // lives in one function so this card, the detail modal and the owner's
+    // own panel can never disagree about which photo is on the listing.
+    $pic      = isla_listing_photo_src($p['profile_picture'] ?? null, $p['user_pic'] ?? null);
     $jobs     = (int) ($p['completed_jobs'] ?? 0);   // hired + finished jobs
     $avgR     = round((float) ($p['avg_rating'] ?? 0), 1);
     $revN     = (int) ($p['review_count'] ?? 0);
@@ -656,6 +687,18 @@ function feedCardHtml(array $p, array $categories, int $myId, string $csrf, arra
     // copy would just be a misleading second source of truth.
     $own = (int) $p['user_id'] === $myId ? '1' : '0';
 
+    // The album rides along as a pipe-separated list of URLs so the
+    // detail modal can build its gallery the instant the card is
+    // tapped — no request, no spinner. '|' cannot occur in a URL that
+    // isla_upload_url() builds (it rawurlencodes the stored name), so
+    // it is a safe separator, and the whole attribute is escaped once
+    // as the browser hands it back verbatim through dataset.album.
+    $albumUrls = [];
+    foreach ($albums as $albumPhoto) {
+        $albumUrls[] = isla_upload_url((string) $albumPhoto['name']);
+    }
+    $albumAttr = $albumUrls === [] ? '' : htmlspecialchars(implode('|', $albumUrls));
+
     // --- Save heart, BESIDE the name ----------------------------
     // The same POST toggle the directory uses (save_listing.php), so a
     // listing can be bookmarked straight from the Home feed without
@@ -694,6 +737,10 @@ function feedCardHtml(array $p, array $categories, int $myId, string $csrf, arra
         . ' data-reviews="' . $revN . '"'
         . ' data-onjob="' . ($onJob ? '1' : '0') . '"'
         . ' data-pic="' . ($pic ? htmlspecialchars($pic) : '') . '"'
+        // Only a BUSINESS listing ever has album rows (upload_listing_photos.php
+        // refuses the album for an individual one), so an empty attribute here
+        // simply means "no extra photos".
+        . ' data-album="' . $albumAttr . '"'
         . ' data-desc="' . htmlspecialchars($desc) . '"'
         . ' data-units="' . ($isBusiness && $hasUnits ? (int) $units : '') . '"'
         . ' data-map-lat="' . ($hasPin ? htmlspecialchars((string) $mapLat) : '') . '"'
@@ -759,6 +806,32 @@ $stmt = $pdo->query(
 );
 $allProviders = $stmt->fetchAll();
 
+// --- 8. Every listing's photo album -----------------------------
+// provider_album_images holds the extra pictures a BUSINESS listing
+// was given, capped at ISLA_ALBUM_MAX_PHOTOS rows per listing, so the
+// whole table is small enough to read in ONE query and group in PHP —
+// no per-listing round trip while rendering a feed of every listing on
+// the island.
+//
+// It is loaded here, before a single card is rendered, because two
+// very different places need it: a public feed card carries its album
+// as a data attribute so tapping the card can fill the detail modal's
+// gallery without a request, and the owner's own card in the Settings
+// panel needs the same rows to draw its thumbnails and its "n of 5"
+// counter. One read serves both.
+$albumByProvider = [];
+$albumStmt = $pdo->query(
+    'SELECT provider_id, id, image_name
+       FROM provider_album_images
+      ORDER BY provider_id ASC, sort_order ASC, id ASC'
+);
+foreach ($albumStmt->fetchAll() as $albumRow) {
+    $albumByProvider[(int) $albumRow['provider_id']][] = [
+        'id'   => (int) $albumRow['id'],
+        'name' => (string) $albumRow['image_name'],
+    ];
+}
+
 // ($savedIds — the lookup map the feed's cards use — was built in
 // step 7c from the saved-listings panel's own query.)
 
@@ -814,7 +887,10 @@ if ($topRecs) {
         // of the feed down.
         . '<div class="feed-rail">';
     foreach ($topRecs as $item) {
-        $feedHtml .= feedCardHtml($item['p'], $providerCategories, (int) $user['id'], $csrf, $savedIds);
+        $feedHtml .= feedCardHtml(
+            $item['p'], $providerCategories, (int) $user['id'], $csrf, $savedIds,
+            false, $albumByProvider[(int) $item['p']['id']] ?? []
+        );
     }
     $feedHtml .= '</div></section>';
 }
@@ -852,7 +928,10 @@ foreach ($providerCategories as $slug => $label) {
         . '<h3 class="feed-section-title">⭐ ' . htmlspecialchars($label) . '</h3>'
         . '<div class="feed-rail">';
     foreach ($topCat as $p) {
-        $feedHtml .= feedCardHtml($p, $providerCategories, (int) $user['id'], $csrf, $savedIds);
+        $feedHtml .= feedCardHtml(
+            $p, $providerCategories, (int) $user['id'], $csrf, $savedIds,
+            false, $albumByProvider[(int) $p['id']] ?? []
+        );
     }
     $feedHtml .= '</div></section>';
 }
@@ -877,7 +956,8 @@ foreach ($allProviders as $catalogueRow) {
         (int) $user['id'],
         $csrf,
         $savedIds,
-        true
+        true,
+        $albumByProvider[(int) $catalogueRow['id']] ?? []
     );
 }
 if ($catalogueCardsHtml !== '') {
@@ -1288,9 +1368,29 @@ include __DIR__ . '/../include/head_meta.php';
                                     ? $myProvider['name']
                                     : $user['full_name'];
                                 $provName = htmlspecialchars($provName);
-                                // Photo + phone inherit from the account.
-                                $provPic  = $user['profile_picture']
-                                    ? isla_upload_url($user['profile_picture']) : null;
+                                // The picture on THIS listing: its own when
+                                // the owner has set one, the shared account
+                                // avatar otherwise (see
+                                // isla_listing_photo_src). The phone is
+                                // still the account's — only the picture can
+                                // differ per listing.
+                                $provPic   = isla_listing_photo_src($myProvider['profile_picture'] ?? null, $user['profile_picture'] ?? null);
+                                $hasOwnPic = trim((string) ($myProvider['profile_picture'] ?? '')) !== '';
+                                // This listing's album, and whether there is
+                                // room left in it. Only a BUSINESS listing
+                                // gets one at all.
+                                $provAlbum   = $albumByProvider[(int) $myProvider['id']] ?? [];
+                                $albumUsed   = count($provAlbum);
+                                $albumSlots  = ISLA_ALBUM_MAX_PHOTOS - $albumUsed;
+                                $isBusinessCard = $myProvider['profile_type'] === 'business';
+                                // "At least one picture": a listing that has
+                                // no cover of its own, no album photo and no
+                                // account avatar would be a blank card in the
+                                // directory, so it is flagged rather than
+                                // blocked — the owner is told exactly which
+                                // one of the three is missing.
+                                $hasNoPicAtAll = !$hasOwnPic && $albumUsed === 0
+                                    && trim((string) ($user['profile_picture'] ?? '')) === '';
                                 $provPhone = htmlspecialchars($user['phone'] ?? '');
                                 $avgR = round((float) ($myProvider['avg_rating'] ?? 0), 1);
                                 $revN = (int) ($myProvider['review_count'] ?? 0);
@@ -1305,16 +1405,70 @@ include __DIR__ . '/../include/head_meta.php';
                                 ?>
                                 <div class="provider-card isla-mine">
                                     <div class="provider-card-top">
-                                        <?php if ($provPic): ?>
-                                            <img src="<?php echo e($provPic); ?>" alt="<?php echo $provName; ?>" class="provider-card-pic">
-                                        <?php else: ?>
-                                            <span class="provider-card-pic provider-card-pic-placeholder"><?php echo htmlspecialchars($provInitials ?: '?'); ?></span>
-                                        <?php endif; ?>
+                                        <div class="prov-photo">
+                                            <?php if ($provPic): ?>
+                                                <img src="<?php echo e($provPic); ?>" alt="<?php echo $provName; ?>" class="provider-card-pic">
+                                            <?php else: ?>
+                                                <span class="provider-card-pic provider-card-pic-placeholder"><?php echo htmlspecialchars($provInitials ?: '?'); ?></span>
+                                            <?php endif; ?>
+                                            <!-- Change THIS listing's picture. The
+                                                 account avatar is a separate
+                                                 setting (Settings -> Profile);
+                                                 this one only ever touches
+                                                 providers.profile_picture for
+                                                 the listing on this card. -->
+                                            <form action="upload_listing_photos.php" method="POST" enctype="multipart/form-data"
+                                                  class="prov-photo-form" data-listing-photo-form>
+                                                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                                <input type="hidden" name="action" value="cover">
+                                                <input type="hidden" name="profile_id" value="<?php echo (int) $myProvider['id']; ?>">
+                                                <input type="file" name="cover_photo" accept="image/jpeg,image/png" hidden
+                                                       aria-label="Choose a picture for this profile">
+                                                <button type="submit" class="prov-photo-btn"
+                                                        title="<?php echo $hasOwnPic ? 'Change this profile picture' : 'Add a picture for this profile'; ?>">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                                    <span><?php echo $hasOwnPic ? 'Change picture' : 'Add picture'; ?></span>
+                                                </button>
+                                            </form>
+                                        </div>
                                         <div class="provider-card-head">
                                             <h5><?php echo $provName; ?></h5>
                                             <span class="provider-badge"><?php echo $provCat; ?></span>
                                         </div>
                                     </div>
+
+                                    <?php if ($hasNoPicAtAll): ?>
+                                        <!-- The one thing a listing must never
+                                             be: a blank card in the directory.
+                                             Flagged, not blocked, because a
+                                             listing created before this feature
+                                             simply has no picture yet. -->
+                                        <div class="photo-warning">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                                            <span>
+                                                <strong>No picture yet.</strong>
+                                                Clients browsing the directory see
+                                                a blank card for this listing until it has one &mdash;
+                                                add a profile picture, a photo from the album, or set
+                                                one on your account.
+                                            </span>
+                                        </div>
+                                    <?php elseif ($hasOwnPic): ?>
+                                        <!-- Only offered when removing it would
+                                             leave the listing with a picture
+                                             (the album or the account avatar);
+                                             the handler refuses the last one
+                                             regardless. -->
+                                        <form action="upload_listing_photos.php" method="POST" class="prov-photo-remove">
+                                            <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                            <input type="hidden" name="action" value="cover">
+                                            <input type="hidden" name="profile_id" value="<?php echo (int) $myProvider['id']; ?>">
+                                            <input type="hidden" name="remove_cover" value="1">
+                                            <button type="submit" class="prov-photo-remove-btn">
+                                                Use my account picture instead
+                                            </button>
+                                        </form>
+                                    <?php endif; ?>
                                     <!-- Rating for this specific profile -->
                                     <div class="card-rating">
                                         <?php if ($revN > 0): ?>
@@ -1367,6 +1521,87 @@ include __DIR__ . '/../include/head_meta.php';
                                         <?php $d = $myProvider['profile_description']; $snip = function_exists('mb_substr') ? (mb_strlen($d) > 110 ? mb_substr($d, 0, 110) . '…' : $d) : (strlen($d) > 110 ? substr($d, 0, 110) . '…' : $d); ?>
                                         <p class="card-desc"><?php echo htmlspecialchars($snip); ?></p>
                                     <?php endif; ?>
+
+                                    <!-- ============ PHOTO ALBUM (business) ============
+                                         A listing can hold up to ISLA_ALBUM_MAX_PHOTOS
+                                         extra pictures, which is what a business is
+                                         actually sold on: the frontage, the rooms,
+                                         the bikes on the rack. An INDIVIDUAL
+                                         listing is a person and the account avatar
+                                         is that person, so the block is not offered
+                                         there and the handler refuses it too.
+
+                                         The "Add photos" input is a MULTIPLE file
+                                         input, so the owner picks up to a batch in
+                                         one go instead of one file per tap; the
+                                         handler still counts them, and refuses a
+                                         batch that would pass the cap rather than
+                                         saving the first few and dropping the rest
+                                         behind their back. -->
+                                    <?php if ($isBusinessCard): ?>
+                                        <div class="prov-album">
+                                            <div class="prov-album-head">
+                                                <span class="prov-album-title">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                                                    Photos
+                                                </span>
+                                                <span class="prov-album-count<?php echo $albumSlots <= 0 ? ' is-full' : ''; ?>">
+                                                    <?php echo $albumUsed; ?> of <?php echo ISLA_ALBUM_MAX_PHOTOS; ?>
+                                                </span>
+                                            </div>
+
+                                            <?php if ($provAlbum): ?>
+                                                <ul class="prov-album-grid">
+                                                    <?php foreach ($provAlbum as $provPhoto): ?>
+                                                        <li>
+                                                            <img src="<?php echo e(isla_upload_url($provPhoto['name'])); ?>"
+                                                                 alt="Photo of <?php echo $provName; ?>" loading="lazy">
+                                                            <!-- One POST per photo: the id is
+                                                                 scoped to THIS listing by the
+                                                                 handler, so a tampered id removes
+                                                                 nothing. -->
+                                                            <form action="upload_listing_photos.php" method="POST" class="prov-album-del"
+                                                                  onsubmit="return confirm('Remove this photo from the album?');">
+                                                                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                                                <input type="hidden" name="action" value="album_remove">
+                                                                <input type="hidden" name="profile_id" value="<?php echo (int) $myProvider['id']; ?>">
+                                                                <input type="hidden" name="image_id" value="<?php echo (int) $provPhoto['id']; ?>">
+                                                                <button type="submit" aria-label="Remove this photo">&times;</button>
+                                                            </form>
+                                                        </li>
+                                                    <?php endforeach; ?>
+                                                </ul>
+                                            <?php else: ?>
+                                                <p class="prov-album-empty">
+                                                    No extra photos yet &mdash; clients see your profile picture on this listing.
+                                                </p>
+                                            <?php endif; ?>
+
+                                            <?php if ($albumSlots > 0): ?>
+                                                <form action="upload_listing_photos.php" method="POST" enctype="multipart/form-data"
+                                                      class="prov-album-form" data-listing-photo-form>
+                                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                                    <input type="hidden" name="action" value="album_add">
+                                                    <input type="hidden" name="profile_id" value="<?php echo (int) $myProvider['id']; ?>">
+                                                    <input type="file" name="album_photos[]" accept="image/jpeg,image/png" multiple
+                                                           hidden aria-label="Choose photos to add to this album">
+                                                    <button type="submit" class="btn btn-small btn-outline">
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                                        Add photo<?php echo $albumSlots === 1 ? '' : 's'; ?>
+                                                    </button>
+                                                </form>
+                                            <?php else: ?>
+                                                <p class="prov-album-full">
+                                                    This album is full at <?php echo ISLA_ALBUM_MAX_PHOTOS; ?> photos. Remove one to swap it.
+                                                </p>
+                                            <?php endif; ?>
+                                            <p class="prov-album-hint">
+                                                JPG or PNG, up to 5&nbsp;MB each. Clients see these in the listing&rsquo;s
+                                                photo gallery.
+                                            </p>
+                                        </div>
+                                    <?php endif; ?>
+
                                     <?php if ((int) ($myProvider['needs_pin'] ?? 0) === 1): ?>
                                         <!-- This BUSINESS listing has no coordinates,
                                              so the directory shows no "Get Route"
@@ -1848,6 +2083,12 @@ include __DIR__ . '/../include/head_meta.php';
                     </div>
                 </div>
             </div>
+            <!-- Photo gallery: the album of a BUSINESS listing, filled on
+                 tap from the card's data-album (see openProviderDetail).
+                 Hidden for everything with no album, and a tap on a
+                 thumbnail opens the same full-size lightbox the profile
+                 picture uses, so there is only one viewer in the app. -->
+            <div class="pm-gallery" id="pmGallery" hidden></div>
             <div class="pm-rating" id="pmRating"></div>
             <!-- Contextual detail: the worker's full description or
                  the business's available-unit count (hidden when the
@@ -2174,6 +2415,55 @@ include __DIR__ . '/../include/head_meta.php';
             }
         });
 
+        // ============================================================
+        // Listing photos (Settings -> islaFIND Profile)
+        // Every listing card carries its own upload form — the cover
+        // picture and, for a business, the album — marked with
+        // data-listing-photo-form. They all behave the same way: the
+        // button opens the hidden file input, and choosing a file
+        // posts the form straight to upload_listing_photos.php.
+        //
+        // form.submit() bypasses the submit event, so busy.js never sees
+        // it and would never add the spinner. The busy state is
+        // therefore set by hand here, exactly as it is for the account
+        // avatar above. The button is NOT disabled: a disabled control is
+        // left out of the form's data set, which silently drops its
+        // name/value from the POST (see busy.js).
+        // ============================================================
+        document.querySelectorAll('[data-listing-photo-form]').forEach(function (form) {
+            const input  = form.querySelector('input[type="file"]');
+            const button = form.querySelector('button');
+            if (!input || !button) return;
+
+            button.addEventListener('click', function (event) {
+                event.preventDefault();   // the button never posts on its own
+                input.click();
+            });
+
+            input.addEventListener('change', function () {
+                if (!input.files.length) return;
+                button.classList.add('is-loading');
+                form.setAttribute('aria-busy', 'true');
+                form.submit();
+            });
+        });
+
+        // A thumbnail in the detail modal's gallery opens the SAME
+        // lightbox the profile picture uses, so the app has one
+        // full-size viewer rather than one per surface. Delegated on the
+        // strip, whose contents are replaced on every card opened.
+        const pmGallery = document.getElementById('pmGallery');
+        if (pmGallery) {
+            pmGallery.addEventListener('click', function (event) {
+                const img = event.target.closest ? event.target.closest('img') : null;
+                if (!img) return;
+                lightboxImg.src = img.src;
+                lightboxImg.alt = 'Listing photo';
+                lightbox.hidden = false;
+                document.body.classList.add('no-scroll');
+            });
+        }
+
         // Escape closes whichever overlay is open.
         document.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
@@ -2451,13 +2741,36 @@ include __DIR__ . '/../include/head_meta.php';
             document.getElementById('pmType').textContent =
                 card.dataset.type === 'individual' ? 'Individual Skills' : 'Business';
 
-            // Photo (hidden when the account has none).
+            // Photo (hidden when neither the listing nor the account
+            // has one).
             const pic = document.getElementById('pmPic');
             if (card.dataset.pic) {
                 pic.src = card.dataset.pic;
                 pic.hidden = false;
             } else {
                 pic.hidden = true;
+            }
+
+            // Photo gallery: a business listing's album rides along on
+            // the card as data-album (a pipe-separated list of URLs), so
+            // the strip is filled on tap with no request and no spinner.
+            // The URLs are escaped on the way into innerHTML for the
+            // same reason escHtml is used everywhere else here — the
+            // value came back out of an attribute, and innerHTML is not
+            // a text setter.
+            const gallery = document.getElementById('pmGallery');
+            const albumList = (card.dataset.album || '').split('|').filter(Boolean);
+            if (albumList.length) {
+                gallery.innerHTML = albumList.map(function (src) {
+                    return '<button type="button" class="pm-gallery-item">'
+                        + '<img src="' + escHtml(src) + '" alt="" loading="lazy"></button>';
+                }).join('');
+                gallery.hidden = false;
+            } else {
+                // Cleared, not just hidden: the next card opened may have
+                // no album, and stale thumbnails must never linger.
+                gallery.innerHTML = '';
+                gallery.hidden = true;
             }
 
             // Rating row: stars + number + review count, or a hint.

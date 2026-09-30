@@ -55,9 +55,13 @@
     function applyType(type) {
         showField(bizNameGroup, type === 'business');
         if (syncNotice) {
+            // Same wording create_profile.php renders, so the hint never
+            // contradicts the field set actually on screen. A business
+            // listing may be given its own picture (and a photo album)
+            // after it is created, so the notice points at Settings.
             syncNotice.textContent = type === 'business'
-                ? 'Your account photo and contact number will be shown on this listing.'
-                : 'Your name, photo and contact number from your account will be shown on this listing.';
+                ? 'Your contact number will be shown on this listing, and it starts with your account photo until you give it one of its own. Add pictures any time from Settings, on the card for this profile.'
+                : 'Your name, photo and contact number from your account will be shown on this listing. You can give this profile a picture of its own any time, from Settings.';
         }
         contextFields.forEach(function (field) {
             showField(field, field.dataset.context === type);

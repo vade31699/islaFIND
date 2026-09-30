@@ -530,6 +530,152 @@ foreach (['setup_own.php', '_smtp_test.php', 'dashboard_smoke_test.php', 'render
 }
 
 // ============================================================
+// 1e. LISTING PHOTOS — a listing's own picture + a business album
+// ============================================================
+echo "\n-- Static: listing pictures and the business photo album\n";
+
+// The endpoint must be wired like every other writer in the app.
+$listingPhotos = is_file($web . '/upload_listing_photos.php')
+    ? (string) file_get_contents($web . '/upload_listing_photos.php')
+    : '';
+check('upload_listing_photos.php exists', $listingPhotos !== '');
+check(
+    'upload_listing_photos.php requires POST + a CSRF token',
+    strpos($listingPhotos, 'csrf_check()') !== false
+        && strpos($listingPhotos, "REQUEST_METHOD'] !== 'POST'") !== false
+);
+// Ownership, not just a session: an id from another person's listing must
+// find nothing. The provider lookup itself carries the user_id.
+check(
+    'upload_listing_photos.php refuses a listing that is not yours',
+    strpos($listingPhotos, 'FROM providers WHERE id = :id AND user_id = :uid') !== false
+);
+// The photo being deleted is scoped to the listing too, so a tampered
+// image_id removes nothing.
+check(
+    'removing an album photo is scoped to the listing it belongs to',
+    strpos($listingPhotos, 'FROM provider_album_images WHERE id = :id AND provider_id = :pid') !== false
+);
+// ONE set of upload rules for the account avatar, a listing's cover and
+// its album. A rule written out twice is a rule that drifts.
+check(
+    'every upload path shares one validator',
+    strpos($listingPhotos, 'isla_upload_validate(') !== false
+        && strpos((string) file_get_contents($web . '/upload_profile.php'), 'isla_upload_validate(') !== false
+        && strpos((string) file_get_contents($incDir . '/uploads.php'), 'function isla_upload_validate(') !== false
+);
+check(
+    'stored filenames are still random, never the browser-supplied one',
+    strpos((string) file_get_contents($incDir . '/uploads.php'), 'function isla_upload_name(') !== false
+        && strpos($listingPhotos, "isla_upload_name('listing'") !== false
+);
+// Both ends of the album's range, enforced on the server:
+//   max 5 — a batch that would pass the cap is REFUSED, not trimmed,
+//          so the owner is never left believing a photo was saved;
+//   min 1 — a listing always resolves to at least one picture (its own
+//          cover, the account avatar, or an album photo), so the last
+//          one cannot be taken away.
+check(
+    'the album is capped server-side at the shared limit',
+    strpos((string) file_get_contents($incDir . '/uploads.php'), 'const ISLA_ALBUM_MAX_PHOTOS = 5;') !== false
+        && strpos($listingPhotos, 'ISLA_ALBUM_MAX_PHOTOS - $albumCount') !== false
+        && strpos($listingPhotos, 'if ($slots <= 0)') !== false
+        && strpos($listingPhotos, 'count($uploads) > $slots') !== false
+);
+check(
+    'the last picture on a listing cannot be removed',
+    strpos($listingPhotos, "'error',\n            'A profile needs at least one picture.") !== false
+);
+// The album is a business feature: an individual listing is a person,
+// and the account avatar is that person.
+check(
+    'the album is refused for an individual listing',
+    strpos($listingPhotos, "if (!\$isBusiness)") !== false
+        && strpos($listingPhotos, "A photo album is for business listings.") !== false
+);
+// Listing pictures die with the listing and with the account, or they
+// become orphans in uploads/ that nothing points at any more.
+$deleteProfile = (string) file_get_contents($web . '/delete_profile.php');
+check(
+    'deleting a listing deletes the files it owned (never the account avatar)',
+    strpos($deleteProfile, 'provider_album_images') !== false
+        && strpos($deleteProfile, 'isla_upload_delete((string) $ownedFile[\'cover_pic\'])') !== false
+        && strpos($deleteProfile, 'isla_upload_delete((string) $ownedFile[\'album_pic\'])') !== false
+        && strpos($deleteProfile, 'every other listing of this person is still using') !== false
+);
+check(
+    'deleting the account deletes every listing picture too',
+    strpos($dashboard, 'LEFT JOIN provider_album_images a ON a.provider_id = p.id') !== false
+);
+// The schema ships both halves — the column on an existing table and the
+// new table — in the dump AND at runtime, so a live install upgrades
+// itself instead of needing the dump re-imported.
+$dumpSrc = (string) file_get_contents($root . '/final_app.sql');
+$dbSrc   = (string) file_get_contents($incDir . '/db.php');
+check(
+    'the schema ships the album table and the listing picture column',
+    strpos($dumpSrc, 'CREATE TABLE IF NOT EXISTS provider_album_images') !== false
+        && strpos($dumpSrc, 'profile_picture VARCHAR(255)  NULL') !== false
+        && strpos($dbSrc, 'CREATE TABLE IF NOT EXISTS provider_album_images') !== false
+        && strpos($dbSrc, 'ALTER TABLE providers ADD COLUMN profile_picture') !== false
+        // The column is a column, not a table, so the ALTER has to probe
+        // information_schema first or it throws on every request after
+        // the first one.
+        && strpos($dbSrc, "TABLE_NAME   = 'providers'") !== false
+);
+// A listing with no picture of its own must keep showing the account
+// avatar — that fallback is what let the column be added without editing
+// one existing row or one rendered card.
+check(
+    'a listing with no picture of its own falls back to the account avatar',
+    strpos((string) file_get_contents($incDir . '/uploads.php'), 'function isla_listing_photo_src(') !== false
+        && strpos($dashboard, 'isla_listing_photo_src($p[\'profile_picture\'] ?? null, $p[\'user_pic\'] ?? null)') !== false
+        && strpos($dashboard, 'isla_listing_photo_src($myProvider[\'profile_picture\'] ?? null, $user[\'profile_picture\'] ?? null)') !== false
+);
+// The owner's own card: a per-listing picture control (NOT the account
+// one, which lives in the Profile panel) and, for a business, the album
+// with its "n of 5" counter and a multiple-file picker.
+check(
+    'the isla panel offers a picture control on every listing card',
+    strpos($dashboard, 'data-listing-photo-form') !== false
+        && strpos($dashboard, 'name="action" value="cover"') !== false
+        && strpos($dashboard, 'name="cover_photo" accept="image/jpeg,image/png"') !== false
+        && strpos($dashboard, 'name="remove_cover" value="1"') !== false
+);
+check(
+    'the business card manages an album of up to 5, one file per tap allowed in a batch',
+    strpos($dashboard, 'name="album_photos[]" accept="image/jpeg,image/png" multiple') !== false
+        && strpos($dashboard, 'name="action" value="album_add"') !== false
+        && strpos($dashboard, 'name="action" value="album_remove"') !== false
+        && strpos($dashboard, '<?php echo ISLA_ALBUM_MAX_PHOTOS; ?>') !== false
+);
+// A listing that would render as a blank card is flagged for its owner —
+// the same "act on this" treatment a missing map pin already gets.
+check(
+    'a listing with no picture at all is flagged for its owner',
+    strpos($dashboard, '$hasNoPicAtAll') !== false
+        && strpos($dashboard, 'class="photo-warning"') !== false
+        && strpos($cssSrc, '.photo-warning {') !== false
+);
+// ...and the album is visible to the people it exists for. The URLs ride
+// on the card so the modal's gallery needs no request.
+check(
+    'visitors see the album in the listing detail modal',
+    strpos($dashboard, 'data-album=') !== false
+        && strpos($dashboard, 'id="pmGallery"') !== false
+        && strpos($dashboard, "card.dataset.album || ''") !== false
+        && strpos($cssSrc, '.pm-gallery {') !== false
+        && strpos($cssSrc, '.pm-gallery-item {') !== false
+);
+check(
+    'style.css styles the owner\'s picture + album controls',
+    strpos($cssSrc, '.prov-photo-btn {') !== false
+        && strpos($cssSrc, '.prov-album-grid {') !== false
+        && strpos($cssSrc, '.prov-album-count {') !== false
+        && strpos($cssSrc, '.prov-album-del {') !== false
+);
+
+// ============================================================
 // 2. LIVE CHECKS (PHP built-in server on a spare port)
 // ============================================================
 echo "\n-- Live: load the pages over HTTP\n";

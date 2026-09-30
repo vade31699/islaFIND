@@ -4,12 +4,17 @@
 // A dedicated backend that receives the profile picture form
 // from the dashboard's profile panel. It:
 //   1. Rejects unauthenticated / CSRF-invalid requests
-//   2. Validates the file is a real JPG/PNG image (max 5 MB)
+//   2. Validates the file is a real JPG/PNG image (max 5 MB),
+//      using the shared rules in include/uploads.php
 //   3. Saves it under a unique, random filename
 //   4. AUTOMATICALLY DELETES the user's previous picture file
 //   5. Updates the profile_picture path in the database
 // Then redirects back to the dashboard profile panel with a
 // success or error message (carried in a session flash).
+//
+// SCOPE: this is the ACCOUNT avatar only. A listing's own picture
+// and its photo album are handled by upload_listing_photos.php,
+// which shares the same validation and storage helpers.
 // ============================================================
 
 // --- 1. Harden the session cookie, then start the session ------
@@ -69,36 +74,19 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 $file = $_FILES['profile_picture'] ?? null;
 
 // --- 8. Validation ----------------------------------------------
-// (a) A file must actually be present and uploaded without errors.
-if (!$file || $file['error'] !== UPLOAD_ERR_OK) {
-    flashRedirect('error', 'Please choose an image file to upload.');
-}
+// All of it lives in include/uploads.php (isla_upload_validate), so
+// the account avatar, a listing's own photo and its album are judged
+// by exactly the same rules: 5 MB maximum, a real image (getimagesize
+// reads the CONTENT, so a .txt renamed to .png still fails), JPG or
+// PNG only. Nothing here re-implements any of that.
+$check = isla_upload_validate(is_array($file) ? $file : [], 5 * 1024 * 1024);
 
-// (b) Size cap: 5 MB maximum (the plan's requirement).
-if ($file['size'] > 5 * 1024 * 1024) {
-    flashRedirect('error', 'The image must be 5 MB or smaller.');
-}
-
-// (c) getimagesize() returns FALSE for non-images, so it both
-// confirms the file really is an image AND gives us its true MIME
-// type — a spoofed extension (e.g. rename evil.txt to evil.png)
-// still fails here because the file's content is not an image.
-$imgInfo = @getimagesize($file['tmp_name']);
-if ($imgInfo === false) {
-    flashRedirect('error', 'The file is not a valid image.');
-}
-
-// (d) Only JPG and PNG are accepted (matches the front-end accept).
-if (!in_array($imgInfo['mime'], ['image/jpeg', 'image/png'], true)) {
-    flashRedirect('error', 'Only JPG and PNG images are allowed.');
+if (!$check['ok']) {
+    flashRedirect('error', $check['error']);
 }
 
 // --- 9. Unique filename + save ----------------------------------
-// Build a random filename: user_<customId>_<16 random hex chars>.
-// The original filename is NEVER trusted (it could contain path
-// tricks); the random suffix prevents collisions entirely.
-$ext      = $imgInfo['mime'] === 'image/png' ? 'png' : 'jpg';
-$filename = 'user_' . $user['user_id'] . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+$filename = isla_upload_name('user', (int) $user['user_id'], $check['ext']);
 // Hand the bytes to the storage seam — the local uploads folder
 // unless the app is configured for a remote driver.
 if (!isla_upload_store($file['tmp_name'], $filename)) {

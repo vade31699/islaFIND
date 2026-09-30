@@ -24,9 +24,11 @@ require_once __DIR__ . '/db_settings.php';
 /**
  * isla_ensure_schema(PDO $pdo)
  * Creates tables that a feature added AFTER the database was first
- * built: saved_listings (the bookmarked-listings heart) and
- * login_attempts (the server-side failed-login counters), neither of
- * which existed in the original schema dump.
+ * built: saved_listings (the bookmarked-listings heart),
+ * login_attempts (the server-side failed-login counters) and
+ * provider_album_images (a business listing's photo album),
+ * none of which existed in the original schema dump. It also adds
+ * providers.profile_picture, the listing's own picture.
  *
  * Why here instead of only in final_app.sql: an existing deployment
  * must not have to re-import the dump to use a new feature. Every
@@ -37,10 +39,12 @@ require_once __DIR__ . '/db_settings.php';
  *
  * A failure here must NOT take the whole app down, so errors are
  * logged and swallowed — the only consequence is that the bookmarks
- * feature reports "unavailable" instead of crashing every page, and
- * that login throttling reads an empty table (which the throttle
- * helpers treat as "no failures yet").
-
+ * feature reports "unavailable" instead of crashing every page, that
+ * login throttling reads an empty table (which the throttle helpers
+ * treat as "no failures yet"), and that a listing's own picture
+ * column is missing, which leaves every card on the account avatar
+ * it already used.
+ *
  * @param PDO $pdo Live connection created just above.
  * @return void
  */
@@ -92,6 +96,43 @@ function isla_ensure_schema(PDO $pdo): void
                     REFERENCES providers (id) ON DELETE CASCADE
             ) ENGINE = InnoDB'
         );
+
+        // provider_album_images holds a BUSINESS listing's photo album
+        // (see final_app.sql). Same reasoning as the two tables above:
+        // the dump is the schema of record, this keeps an existing
+        // database in step with it without a re-import.
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS provider_album_images (
+                id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                provider_id INT UNSIGNED NOT NULL,
+                image_name  VARCHAR(255) NOT NULL,
+                sort_order  TINYINT UNSIGNED NOT NULL DEFAULT 0,
+                created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                KEY idx_album_provider (provider_id, sort_order, id),
+                CONSTRAINT fk_album_provider FOREIGN KEY (provider_id)
+                    REFERENCES providers (id) ON DELETE CASCADE
+            ) ENGINE = InnoDB'
+        );
+
+        // providers.profile_picture is a COLUMN, not a table, so it
+        // needs the information_schema probe before the ALTER: a plain
+        // ADD COLUMN would throw on every request after the first one
+        // ("Duplicate column name"), and this runs once per session.
+        // A NULL value is the point of the column — NULL means "this
+        // listing has no picture of its own yet" and every card falls
+        // back to the account avatar, so no existing row changes.
+        $hasListingPic = (bool) $pdo->query(
+            "SELECT 1 FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME   = 'providers'
+                AND COLUMN_NAME  = 'profile_picture'
+              LIMIT 1"
+        )->fetchColumn();
+
+        if (!$hasListingPic) {
+            $pdo->exec('ALTER TABLE providers ADD COLUMN profile_picture VARCHAR(255) NULL AFTER name');
+        }
     } catch (PDOException $e) {
         // Logged, never fatal: the app keeps working, only the new
         // feature that needs this table reports itself unavailable.

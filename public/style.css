@@ -4652,3 +4652,267 @@ body {
         letter-spacing: 3px;
     }
 }
+
+/* ============================================================
+   Listing photos (Settings -> islaFIND Profile)
+   A listing can carry a picture of its OWN instead of the shared
+   account avatar, and a BUSINESS listing can carry an album of up
+   to 5. Both are managed on the owner's card in the isla panel
+   (upload_listing_photos.php) and shown to visitors as a gallery
+   inside the listing's detail modal.
+   ============================================================ */
+
+/* The avatar plus its "Change picture" button stack in one column,
+   so the button sits UNDER the photo instead of beside it. The card
+   header is already flex-wrap (see .provider-card-top), so nothing
+   here can squeeze the listing name. */
+.prov-photo {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.prov-photo-form {
+    display: contents;
+}
+
+/* Deliberately a quiet ghost button: this is a routine edit offered
+   on every card, so it must not compete with the card's real actions
+   (Edit / Delete) or the picture it belongs to. */
+.prov-photo-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border: 1px solid var(--primary-soft);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.prov-photo-btn svg {
+    width: 12px;
+    height: 12px;
+}
+
+.prov-photo-btn:hover {
+    background: var(--primary-soft);
+}
+
+/* The same busy treatment busy.js gives a submitting form; set by
+   hand because the file inputs post through form.submit(), which
+   never fires the submit event busy.js listens for. */
+.prov-photo-btn.is-loading {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+.prov-photo-remove {
+    margin: 8px 0 0;
+}
+
+.prov-photo-remove-btn {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: #5b7a6d;
+    font-size: 11px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.prov-photo-remove-btn:hover {
+    color: var(--coral-dark);
+}
+
+/* "No picture yet" reuses the missing-map-pin notice's shape, because
+   it means the same thing to an owner: a listing that cannot yet be
+   acted on in the directory. */
+.photo-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 10px 0;
+    padding: 10px 12px;
+    background: #fff8ec;
+    border: 1px solid #f0dfc0;
+    border-radius: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #8a5a00;
+    text-align: left;
+}
+
+.photo-warning svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+/* ---------- The album block ---------- */
+.prov-album {
+    margin-top: 10px;
+    padding: 10px;
+    background: var(--surface);
+    border: 1px solid #e2ece5;
+    border-radius: 12px;
+}
+
+.prov-album-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.prov-album-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 800;
+    color: #24443a;
+}
+
+.prov-album-title svg {
+    width: 14px;
+    height: 14px;
+    color: var(--primary);
+}
+
+/* The counter is the album's whole status line: "2 of 5" reads as
+   room left, and it turns amber the moment the album is full, so the
+   owner never has to tap Add to discover the cap. */
+.prov-album-count {
+    font-size: 11px;
+    font-weight: 700;
+    color: #5b7a6d;
+    background: #eef5f1;
+    border-radius: 999px;
+    padding: 3px 8px;
+    white-space: nowrap;
+}
+
+.prov-album-count.is-full {
+    color: #8a5a00;
+    background: #fff1d6;
+}
+
+.prov-album-grid {
+    display: grid;
+    /* Five thumbnails fit across the narrowest card without a scroll;
+       anything more would shrink them below a tappable size. */
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    gap: 6px;
+    list-style: none;
+    margin: 0 0 8px;
+    padding: 0;
+}
+
+.prov-album-grid li {
+    position: relative;
+    margin: 0;
+}
+
+.prov-album-grid img {
+    display: block;
+    width: 100%;
+    /* Square thumbnails: a photo album is a set of things to flick
+       through, and a fixed shape keeps the grid from jumping as
+       differently-shaped photos land in it. */
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 8px;
+    background: #e8f3ec;
+}
+
+/* The remove control is an overlay badge, not a row under the grid:
+   it belongs to the photo it removes, and a phone-sized target is
+   what the top-right corner of a 56px thumbnail already is. */
+.prov-album-del {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+}
+
+.prov-album-del button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.62);
+    color: #ffffff;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.prov-album-del button:hover {
+    background: var(--coral-dark);
+}
+
+.prov-album-form {
+    display: flex;
+}
+
+.prov-album-empty,
+.prov-album-full,
+.prov-album-hint {
+    margin: 0 0 8px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #5b7a6d;
+}
+
+.prov-album-hint {
+    margin: 8px 0 0;
+    color: #7d968c;
+}
+
+.prov-album-full {
+    color: #8a5a00;
+}
+
+/* ---------- Visitor side: the gallery in the detail modal ---------- */
+/* A strip, not a carousel: a tap opens the full-size lightbox (the
+   one the profile picture already uses), so the strip only has to
+   show WHAT there is. */
+.pm-gallery {
+    display: flex;
+    gap: 6px;
+    margin: 10px 0 2px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+
+.pm-gallery-item {
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+    padding: 0;
+    border: 1px solid #e2ece5;
+    border-radius: 10px;
+    background: #e8f3ec;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.pm-gallery-item img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}

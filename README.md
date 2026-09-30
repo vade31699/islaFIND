@@ -41,12 +41,29 @@ hand-written JavaScript files.
   built-in fallback that shows the code on screen when mail cannot be sent.
 - **Delete account** — a separate danger zone that requires the account password
   *and* a typed `DELETE`, then removes the account, its listings, chats and
-  uploaded picture.
+  every uploaded picture: the account avatar, plus each listing's own cover and
+  album.
 - **Password strength meter** on sign-up, reset and change-password.
 
 ### islaFIND profiles
 - **Individual Skills** listings (a person's trade) and **Business** listings
   (a shop, resort, rental), each with its own set of categories.
+- **A picture of its own, per listing** — every listing carries its own photo
+  (`providers.profile_picture`), so one shop with three outlets, or one mechanic
+  with a workshop and a roadside stall, is not stuck with a single shared image.
+  A listing with no picture of its own keeps showing the account avatar, so
+  every listing created before this feature looks exactly as it did. It is
+  managed from the **islaFIND Profile** panel (`dashboard.php?tab=isla`), and
+  deleting the listing or the account takes the file with it.
+- **Business photo album** — a *business* listing can hold up to **5** extra
+  photos (`provider_album_images`, kept in order), because a resort, a rental or
+  a shop is chosen on its photos. The visitor sees the cover on the card and the
+  whole album as a strip in the listing's detail modal. Individual listings are
+  refused an album — the account avatar is already that person — and the cap is
+  a hard one: the sixth photo is **refused**, not silently dropped, so an owner
+  is never told a photo was saved when it was not. A listing also can never be
+  left with no picture at all, so the last remaining one (cover or album) cannot
+  be removed while nothing else would still cover for it.
 - **Cascading address picker** — municipality → barangay, from one shared list
   of the official Bantayan barangays (including the offshore islets).
 - **Map pin** — individual listings can capture the device GPS with an
@@ -213,6 +230,8 @@ host (Docker, CI, production) can override any key without touching the file.
 **Handlers** (POST endpoints) — all in `public/`
 
 `logout.php` · `save_profile.php` · `delete_profile.php` · `upload_profile.php` ·
+`upload_listing_photos.php` (a listing's own cover + its business album: one
+handler, three actions) ·
 `send_message.php` · `hire_action.php` · `rate_service.php` ·
 `delete_conversations.php` · `delete_message.php` · `save_listing.php` ·
 `track_view.php`
@@ -226,9 +245,9 @@ host (Docker, CI, production) can override any key without touching the file.
 `db.php` (PDO + schema self-check) · `db_settings.php` (the one place that builds
 a connection — shared with the session store) · `env.php` (.env loader) ·
 `session_store.php` (opt-in MySQL session handler) · `uploads.php` (opt-in storage
-seam for profile pictures) · `categories.php` (types, categories, barangays, map
-centres) · `mailer.php` · `head_meta.php` (shared `<head>`) ·
-`notifications_bell.php`
+seam for the account avatar and listing pictures) · `categories.php` (types,
+categories, barangays, map centres) · `mailer.php` · `head_meta.php` (shared
+`<head>`) · `notifications_bell.php`
 
 **Web root, configuration and assets** (in `public/`) — `.htaccess` (branded
 404, hardening headers, compression) · `manifest.webmanifest` (installable
@@ -285,10 +304,25 @@ What they cover:
   counters grow, checks the wait keeps increasing and then stops growing at the
   cap, proves the IP counter catches one source spraying many accounts, posts the
   login form with a throttled identifier to confirm the page really refuses it,
-  and confirms a refused attempt is not counted again. Every key it uses is a
-  sentinel — identifiers under `render-smoke@example.test` and the reserved
-  `203.0.113.x` addresses — and the rows it creates are deleted again on the way
-  out, so a run can never throttle a real account or IP.
+and confirms a refused attempt is not counted again. Every key it uses is a
+   sentinel — identifiers under `render-smoke@example.test` and the reserved
+   `203.0.113.x` addresses — and the rows it creates are deleted again on the way
+   out, so a run can never throttle a real account or IP.
+   It then drives the listing-photo endpoint with real multipart uploads against
+   a throwaway business listing: a cover is stored and replacing it removes the
+   old file, a batch of 5 is accepted and the 6th is refused, one album photo can
+   be removed, and every refusal is proved to change nothing — a photo id
+   belonging to another listing, somebody else's listing, an individual listing
+   asking for an album, a forged token, a renamed text file. The one-picture
+   floor is checked both ways: the last cover, and the last album photo, both
+   survive while nothing else would still carry the listing.
+   Everything it creates — the listings, the album rows, the files, and the
+   account avatar it borrows for the fallback — is undone by a shutdown handler
+   rather than by a tidy-up at the end, so a fatal error halfway through cannot
+   leave a "Render Photo Test Shop" listing in the real database. Each of those
+   checks builds the state it needs instead of looking for it in the database: a
+   check that quietly skips itself when the data happens to be missing is worse
+   than no check, because the suite still reports green.
 
 Both exit non-zero on failure, so they work as a pre-commit or CI check. They
 create a temporary listing if the database has none, and remove it again
@@ -411,9 +445,11 @@ Implemented everywhere, not per page:
 - **XSS** — everything printed goes through `e()`/`htmlspecialchars()`; inline
   JS strings go through `js_string()`; free-text fields reject markup at input
   time as a second layer.
-- **Uploads** — real image validation with `getimagesize()`, 5 MB cap, random
-  filename, old file removed, and `.htaccess` in `public/uploads/` blocking
-  execution.
+- **Uploads** — real image validation with `getimagesize()` (content, not the
+  filename or the browser's declared type), 5 MB cap, random filename, old file
+  removed, and `.htaccess` in `public/uploads/` blocking execution. The account
+  avatar and a listing's cover + business album all go through the same
+  validation, and the album is capped per listing.
 - **Authorization** — ownership is re-checked server-side on every action
   (edit/delete a listing, revoke a device, accept a hire, delete a message).
 - **Verified reviews** — a review requires a `completed` contract owned by the
@@ -444,7 +480,8 @@ Deliberately **not** done yet:
 | ----- | ----- |
 | `users` | Accounts: names, unique email/phone, DOB (18+ check), password hash, avatar path, verification + MFA flags. |
 | `user_devices` | Trusted sessions shown in Device Logins (no FK, so the delete-account flow clears it by hand). |
-| `providers` | islaFIND listings: type, title, address, map pin, description or unit count, rating aggregates, view/interaction counts. |
+| `providers` | islaFIND listings: type, title, address, map pin, description or unit count, the listing's own picture (`profile_picture`, nullable — `NULL` means "use the owner's account avatar"), rating aggregates, view/interaction counts. |
+| `provider_album_images` | A business listing's extra photos: `provider_id`, the stored filename, its `sort_order`, and when it was added. Up to `ISLA_ALBUM_MAX_PHOTOS` (5) per listing, deleted with the listing by its foreign key. Created at runtime by `db.php` if missing. |
 | `conversations` | One thread per provider–client pair, with `pending` / `accepted` / `declined` request state. |
 | `messages` | Thread messages with a `kind` of `chat` or `system`, plus per-user and per-message soft-delete flags. |
 | `service_contracts` | Jobs: `pending → pending_hire → accepted → completed` (or `declined` / `cancelled`), pinned to the exact listing hired. |

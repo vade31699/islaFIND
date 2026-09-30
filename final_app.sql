@@ -104,8 +104,18 @@ CREATE TABLE IF NOT EXISTS user_devices (
 -- view_count      : how many times the profile was viewed
 -- interaction_count : views + inquiries + searches (popularity)
 -- created_at      : auto-filled with the listing date
--- NOTE: phone and profile_picture are NOT stored here — profile
--- cards inherit them from the user's main account (users table).
+-- NOTE: phone is NOT stored here — profile cards inherit the
+-- contact number from the user's main account (users table).
+-- profile_picture  : the listing's OWN picture, set by its owner
+--                   from Settings -> islaFIND Profile. It is NULL
+--                   until they choose one, and every card then
+--                   falls back to the account avatar
+--                   (users.profile_picture), so a listing created
+--                   before this column existed keeps rendering
+--                   exactly as it did. A BUSINESS listing is the one
+--                   that really needs it: the shop front, the rooms
+--                   and the stock are what a client is deciding on.
+--                   Extra photos live in provider_album_images.
 -- profile_description: free-text blurb for INDIVIDUAL SKILLS
 --                      listings (experience, rates, job details).
 -- unit_inventory     : available-unit count for BUSINESS listings
@@ -120,6 +130,7 @@ CREATE TABLE IF NOT EXISTS providers (
     user_id         INT UNSIGNED  NOT NULL,
     profile_type    VARCHAR(20)   NOT NULL DEFAULT 'business',
     name            VARCHAR(120)  NULL,
+    profile_picture VARCHAR(255)  NULL,
     profile_description TEXT      NULL,
     unit_inventory  INT UNSIGNED  NULL,
     selected_title  VARCHAR(40)   NOT NULL,
@@ -138,6 +149,37 @@ CREATE TABLE IF NOT EXISTS providers (
     KEY idx_providers_title (selected_title),
     CONSTRAINT fk_providers_user FOREIGN KEY (user_id)
         REFERENCES users (id) ON DELETE CASCADE
+) ENGINE = InnoDB;
+
+-- ============================================================
+-- provider_album_images — a BUSINESS listing's photo album
+-- One listing can carry up to ISLA_ALBUM_MAX_PHOTOS (5) extra
+-- pictures, which is what a shop, resort or rental actually sells:
+-- the frontage, the rooms, the bikes on the rack.
+-- id          : primary key
+-- provider_id : the listing these photos belong to
+-- image_name  : bare filename in public/uploads (never a path)
+-- sort_order  : the position the owner arranged them in; 0 = the
+--               first one, and it is what the strip renders by
+-- created_at  : auto-filled with the upload time
+-- The cap is enforced by upload_listing_photos.php, not here: a
+-- hard limit in the schema would make the 6th upload fail with a
+-- driver error instead of a sentence the owner can act on, and it
+-- would be a limit nobody could raise without a migration.
+-- ON DELETE CASCADE means a deleted listing takes its photos with
+-- it (the FILES are removed by delete_profile.php, which knows the
+-- names; the database can only drop the rows).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS provider_album_images (
+    id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    provider_id INT UNSIGNED NOT NULL,
+    image_name  VARCHAR(255) NOT NULL,
+    sort_order  TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_album_provider (provider_id, sort_order, id),
+    CONSTRAINT fk_album_provider FOREIGN KEY (provider_id)
+        REFERENCES providers (id) ON DELETE CASCADE
 ) ENGINE = InnoDB;
 
 -- ============================================================

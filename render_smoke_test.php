@@ -580,7 +580,490 @@ if (!$ready) {
         );
     }
 
-    // --- 5. Login throttling ------------------------------------
+    // --- 5. Listing photos: a picture of its own + the album -----
+    // Everything above proves a listing RENDERS; this proves the photo
+    // controls actually work, because the rules that matter (the 5-photo
+    // cap, the 1-picture floor, the individual/business split, the
+    // ownership check) live in a handler no page render can reach.
+    //
+    // It runs against a THROWAWAY listing owned by the account under
+    // test, and every file it writes is deleted again below and by the
+    // shutdown handler — nothing here may leave a picture or a row
+    // behind in a real database.
+    echo "\n-- Listing photos (own picture + business album)\n";
+
+    require_once $incDir . '/uploads.php';
+
+    /** A real 1x1 PNG, so the handler's getimagesize() test is genuine. */
+    function tiny_png_bytes(): string
+    {
+        return base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+        );
+    }
+
+    /** A real 1x1 JPEG, so the second accepted mime type is covered too. */
+    function tiny_jpeg_bytes(): string
+    {
+        return base64_decode(
+            '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a'
+            . 'HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA'
+            . 'AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q=='
+        );
+    }
+
+    /**
+     * posts_files()
+     * A multipart/form-data POST through curl, which is the only way to
+     * send $_FILES over HTTP.
+     *
+     * The body is assembled BY HAND rather than left to curl's array
+     * form, because a browser's <input type="file" multiple
+     * name="album_photos[]"> sends the same field name once per chosen
+     * file, with the [] as part of the name. curl's array shorthand
+     * numbers the keys instead (album_photos[0]), which PHP hands back
+     * NESTED — a shape the handler correctly does not have to support.
+     * Writing the parts out produces the exact bytes a browser sends,
+     * so this exercises the real $_FILES structure.
+     */
+    function posts_files(string $url, string $sid, array $fields): array
+    {
+        $boundary = '----islaRenderTest' . bin2hex(random_bytes(8));
+        $body     = '';
+
+        foreach ($fields as $name => $value) {
+            if (is_array($value)) {
+                foreach ($value as $path) {
+                    $body .= "--$boundary\r\n"
+                        . 'Content-Disposition: form-data; name="' . $name . '[]"; filename="' . basename((string) $path) . '"' . "\r\n"
+                        . "Content-Type: application/octet-stream\r\n\r\n"
+                        . (string) file_get_contents((string) $path) . "\r\n";
+                }
+            } elseif (is_string($value) && is_file($value)) {
+                $body .= "--$boundary\r\n"
+                    . 'Content-Disposition: form-data; name="' . $name . '"; filename="' . basename($value) . '"' . "\r\n"
+                    . "Content-Type: application/octet-stream\r\n\r\n"
+                    . (string) file_get_contents($value) . "\r\n";
+            } else {
+                $body .= "--$boundary\r\n"
+                    . 'Content-Disposition: form-data; name="' . $name . '"' . "\r\n\r\n"
+                    . (string) $value . "\r\n";
+            }
+        }
+        $body .= "--$boundary--\r\n";
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER         => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $body,
+            CURLOPT_HTTPHEADER     => ['Content-Type: multipart/form-data; boundary=' . $boundary],
+            CURLOPT_TIMEOUT        => 8,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_COOKIE         => 'PHPSESSID=' . $sid,
+        ]);
+        $raw    = (string) curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        $head = preg_split("/\r?\n\r?\n/", $raw, 2)[0] ?? '';
+        $loc  = preg_match('/^Location:\s*(.+)$/mi', $head, $m) ? trim($m[1]) : '';
+
+        return ['status' => $status, 'location' => $loc];
+    }
+
+    $photoListingId = 0;
+    $photoFiles     = [];
+    $testListingIds = [];
+    $uploadDir      = isla_uploads_dir();
+
+    // A throwaway BUSINESS listing: a shop is the one profile type the
+    // album exists for, so the cap and the individual refusal are both
+    // measurable against real rows.
+    $stmt = $pdo->prepare(
+        "INSERT INTO providers (user_id, profile_type, name, selected_title, municipality, barangay, unit_inventory)
+         VALUES (:uid, 'business', 'Render Photo Test Shop', 'hardware', 'Santa Fe', 'Poblacion', 3)"
+    );
+    $stmt->execute([':uid' => $userId]);
+    $photoListingId = (int) $pdo->lastInsertId();
+    $testListingIds[] = $photoListingId;
+
+    // Two image files to upload, one of each accepted type.
+    $pngPath = tempnam(sys_get_temp_dir(), 'isla_png_') . '.png';
+    $jpgPath = tempnam(sys_get_temp_dir(), 'isla_jpg_') . '.jpg';
+    file_put_contents($pngPath, tiny_png_bytes());
+    file_put_contents($jpgPath, tiny_jpeg_bytes());
+
+    // Cleanup, whether the run gets here or dies later.
+    //
+    // The shutdown handler is the ONLY cleanup path, not the tidier at
+    // the end of the section: this test writes to the real database and
+    // the real uploads folder, so a fatal error halfway through must not
+    // leave "Render Photo Test Shop" listings and orphan album rows
+    // behind for the next visitor to see. register_shutdown_function()
+    // still runs on a fatal, an uncaught error and exit().
+    //
+    // The floor checks below switch the account's own avatar off and
+    // back on, so the original value is restored from here as well: an
+    // interrupted run must not leave the account pointing at a file
+    // this test is about to delete.
+    $savedAccountPic   = null;
+    $accountPicTouched = false;
+    $cleanupPhotos = function () use (&$photoFiles, &$testListingIds, $uploadDir, $pngPath, $jpgPath, &$savedAccountPic, &$accountPicTouched, $pdo, $userId) {
+        // Files first: the rows are about to go, and once a row is gone
+        // its filename is unreachable from the database.
+        foreach ($photoFiles as $name) {
+            if (is_file($uploadDir . '/' . $name)) {
+                @unlink($uploadDir . '/' . $name);
+            }
+        }
+        // The album rows go with the listing by cascade, but any row
+        // whose provider was already deleted by hand still needs its
+        // own file collected, which is why the names above are tracked
+        // separately rather than read back from the listing.
+        $delete = $pdo->prepare('DELETE FROM providers WHERE id = :id');
+        foreach ($testListingIds as $id) {
+            if ($id > 0) {
+                $delete->execute([':id' => $id]);
+            }
+        }
+        if ($accountPicTouched) {
+            $pdo->prepare('UPDATE users SET profile_picture = :pic WHERE id = :uid')
+                ->execute([':pic' => $savedAccountPic, ':uid' => $userId]);
+        }
+        @unlink($pngPath);
+        @unlink($jpgPath);
+    };
+    register_shutdown_function($cleanupPhotos);
+
+    if ($csrf !== '' && $photoListingId > 0) {
+        // --- The listing's OWN picture -----------------------------
+        $d6 = [];
+        $r6 = posts_files($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token' => $csrf,
+            'action'     => 'cover',
+            'profile_id' => $photoListingId,
+            'cover_photo' => $pngPath,
+        ]);
+        $coverName = $pdo->query("SELECT profile_picture FROM providers WHERE id = $photoListingId")->fetchColumn();
+        $coverName = $coverName === false ? '' : (string) $coverName;
+        if ($coverName !== '') {
+            $photoFiles[] = $coverName;
+        }
+        check(
+            'a listing gets a picture of its own, stored as a real file',
+            $r6['status'] === 302 && $coverName !== ''
+                && is_file($uploadDir . '/' . $coverName)
+                && strpos($coverName, 'listing_' . $photoListingId . '_') === 0,
+            'status ' . $r6['status'] . ' / stored as "' . $coverName . '"'
+        );
+
+        // Replacing it must not leave the previous file behind: the
+        // handler deletes the old cover only after the new one is
+        // safely stored, so uploads/ never accumulates orphans.
+        $oldCover = $coverName;
+        $r7 = posts_files($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token'  => $csrf,
+            'action'      => 'cover',
+            'profile_id'  => $photoListingId,
+            'cover_photo' => $jpgPath,
+        ]);
+        $newCover = (string) ($pdo->query("SELECT profile_picture FROM providers WHERE id = $photoListingId")->fetchColumn() ?: '');
+        if ($newCover !== '') {
+            $photoFiles[] = $newCover;
+        }
+        check(
+            'replacing a listing picture removes the old file',
+            $r7['status'] === 302 && $newCover !== '' && $newCover !== $oldCover
+                && !is_file($uploadDir . '/' . $oldCover)
+                && is_file($uploadDir . '/' . $newCover),
+            'old "' . $oldCover . '" still on disk / new "' . $newCover . '"'
+        );
+
+        // --- The album, up to the cap ------------------------------
+        // Five in one batch: the limit is 5, so this is the most a
+        // listing can ever hold and it must be accepted.
+        $r8 = posts_files($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token'   => $csrf,
+            'action'       => 'album_add',
+            'profile_id'   => $photoListingId,
+            'album_photos' => [$pngPath, $jpgPath, $pngPath, $jpgPath, $pngPath],
+        ]);
+        $albumRows = $pdo->query("SELECT image_name FROM provider_album_images WHERE provider_id = $photoListingId ORDER BY sort_order, id")
+            ->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($albumRows as $n) {
+            $photoFiles[] = (string) $n;
+        }
+        check(
+            'a business listing accepts a full album of 5',
+            $r8['status'] === 302 && count($albumRows) === ISLA_ALBUM_MAX_PHOTOS
+                && count(array_filter($albumRows, fn($n) => is_file($uploadDir . '/' . $n))) === ISLA_ALBUM_MAX_PHOTOS,
+            'status ' . $r8['status'] . ' / ' . count($albumRows) . ' rows'
+        );
+
+        // The sixth must be REFUSED, not trimmed: a silent drop would
+        // leave the owner believing every photo they picked was saved.
+        $r9 = posts_files($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token'   => $csrf,
+            'action'       => 'album_add',
+            'profile_id'   => $photoListingId,
+            'album_photos' => [$pngPath],
+        ]);
+        $afterOverflow = (int) $pdo->query("SELECT COUNT(*) FROM provider_album_images WHERE provider_id = $photoListingId")->fetchColumn();
+        check(
+            'the 6th photo is refused (the cap is a hard limit)',
+            $r9['status'] === 302 && $afterOverflow === ISLA_ALBUM_MAX_PHOTOS,
+            'rows after the 6th attempt: ' . $afterOverflow
+        );
+
+        // Removing one frees exactly one slot.
+        $firstId = (int) $pdo->query("SELECT id FROM provider_album_images WHERE provider_id = $photoListingId ORDER BY sort_order, id LIMIT 1")->fetchColumn();
+        $d10 = [];
+        $r10 = render_post($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token' => $csrf,
+            'action'     => 'album_remove',
+            'profile_id' => $photoListingId,
+            'image_id'   => $firstId,
+        ], $d10);
+        $afterRemove = (int) $pdo->query("SELECT COUNT(*) FROM provider_album_images WHERE provider_id = $photoListingId")->fetchColumn();
+        check(
+            'one photo can be removed, and its file goes with it',
+            $r10['status'] === 302 && $afterRemove === ISLA_ALBUM_MAX_PHOTOS - 1,
+            'rows after removal: ' . $afterRemove
+        );
+
+        // A photo id from a DIFFERENT listing must remove nothing: the
+        // DELETE is scoped by provider_id, so a tampered form is inert.
+        //
+        // The other listing is CREATED here rather than hunted for in the
+        // table: a check that quietly skips itself when the database
+        // happens to be empty is worse than no check, because the suite
+        // still reports green. Its file is tracked for cleanup like the
+        // rest.
+        $rivalId = 0;
+        $stmt = $pdo->prepare(
+            "INSERT INTO providers (user_id, profile_type, name, selected_title, municipality, barangay)
+             VALUES (:uid, 'business', 'Render Photo Rival Shop', 'hardware', 'Santa Fe', 'Poblacion')"
+        );
+        $stmt->execute([':uid' => $otherId]);
+        $rivalId = (int) $pdo->lastInsertId();
+        $testListingIds[] = $rivalId;
+
+        $rivalName = 'listing_' . $rivalId . '_' . bin2hex(random_bytes(8)) . '.png';
+        file_put_contents($uploadDir . '/' . $rivalName, tiny_png_bytes());
+        $photoFiles[] = $rivalName;
+        $pdo->prepare(
+            'INSERT INTO provider_album_images (provider_id, image_name, sort_order) VALUES (:pid, :name, 0)'
+        )->execute([':pid' => $rivalId, ':name' => $rivalName]);
+
+        $foreignPhotoId = (int) $pdo->query("SELECT id FROM provider_album_images WHERE provider_id = $rivalId ORDER BY id LIMIT 1")->fetchColumn();
+        check(
+            'the rival listing really does hold a photo to protect',
+            $foreignPhotoId > 0,
+            'no album row on the rival listing'
+        );
+
+        $d11 = [];
+        $r11 = render_post($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token' => $csrf,
+            'action'     => 'album_remove',
+            'profile_id' => $photoListingId,
+            'image_id'   => $foreignPhotoId,
+        ], $d11);
+        $rivalRowLeft = (int) $pdo->query("SELECT COUNT(*) FROM provider_album_images WHERE id = $foreignPhotoId")->fetchColumn();
+        check(
+            "another listing's photo id removes nothing",
+            $r11['status'] === 302 && $rivalRowLeft === 1 && is_file($uploadDir . '/' . $rivalName),
+            'rival album rows left: ' . $rivalRowLeft
+                . ' / file still there: ' . (is_file($uploadDir . '/' . $rivalName) ? 'yes' : 'no')
+        );
+
+        // --- Someone else's listing is off limits -------------------
+        if ($foreignId > 0) {
+            $before = (int) $pdo->query("SELECT COUNT(*) FROM provider_album_images WHERE provider_id = $foreignId")->fetchColumn();
+            $r12 = posts_files($base . '/upload_listing_photos.php', $sid, [
+                'csrf_token'   => $csrf,
+                'action'       => 'album_add',
+                'profile_id'   => $foreignId,
+                'album_photos' => [$pngPath],
+            ]);
+            $after = (int) $pdo->query("SELECT COUNT(*) FROM provider_album_images WHERE provider_id = $foreignId")->fetchColumn();
+            check(
+                'a listing belonging to somebody else is refused',
+                $r12['status'] === 302 && $before === $after,
+                'rows ' . $before . ' -> ' . $after
+            );
+        }
+
+        // --- The 1-photo floor --------------------------------------
+        // The floor counts the account avatar as a picture, so the test
+        // controls all three sources explicitly rather than depending on
+        // whether the account under test happens to have a photo:
+        // album emptied, account avatar switched off -> the cover is
+        // the last picture and must survive.
+        $pdo->prepare('DELETE FROM provider_album_images WHERE provider_id = :pid')->execute([':pid' => $photoListingId]);
+
+        // A REAL avatar file for the fallback, so the "may be removed"
+        // case below is proved by a picture that genuinely exists rather
+        // than by a filename pointing at nothing.
+        $testAvatarName = 'render_test_avatar_' . bin2hex(random_bytes(6)) . '.png';
+        file_put_contents($uploadDir . '/' . $testAvatarName, tiny_png_bytes());
+        $photoFiles[] = $testAvatarName;
+
+        $savedAccountPic = $pdo->query("SELECT profile_picture FROM users WHERE id = $userId")->fetchColumn();
+        $accountPicTouched = true;
+        $pdo->prepare('UPDATE users SET profile_picture = NULL WHERE id = :uid')->execute([':uid' => $userId]);
+
+        $d13 = [];
+        $r13 = render_post($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token'   => $csrf,
+            'action'       => 'cover',
+            'profile_id'   => $photoListingId,
+            'remove_cover' => '1',
+        ], $d13);
+        $stillCovered = (string) ($pdo->query("SELECT profile_picture FROM providers WHERE id = $photoListingId")->fetchColumn() ?: '');
+        check(
+            'the last picture on a listing cannot be removed',
+            $r13['status'] === 302 && $stillCovered !== '',
+            'profile_picture is now "' . $stillCovered . '"'
+        );
+
+        // With the account avatar back, the cover may go and the listing
+        // falls through to it again (which is the whole fallback).
+        $pdo->prepare('UPDATE users SET profile_picture = :pic WHERE id = :uid')
+            ->execute([':pic' => $testAvatarName, ':uid' => $userId]);
+        $d14 = [];
+        $r14 = render_post($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token'   => $csrf,
+            'action'       => 'cover',
+            'profile_id'   => $photoListingId,
+            'remove_cover' => '1',
+        ], $d14);
+        $cleared = $pdo->query("SELECT profile_picture FROM providers WHERE id = $photoListingId")->fetchColumn();
+        check(
+            'a cover may be removed when the account avatar still carries the listing',
+            $r14['status'] === 302 && ($cleared === false || $cleared === null || $cleared === ''),
+            'profile_picture is now "' . var_export($cleared, true) . '"'
+        );
+
+        // The album is a business feature. An individual listing is a
+        // person, and the account avatar is that person.
+        $indId = 0;
+        $stmt = $pdo->prepare(
+            "INSERT INTO providers (user_id, profile_type, selected_title, municipality, barangay, profile_description)
+             VALUES (:uid, 'individual', 'mechanic', 'Santa Fe', 'Poblacion', 'Temporary individual listing created by render_smoke_test.php')"
+        );
+        $stmt->execute([':uid' => $userId]);
+        $indId = (int) $pdo->lastInsertId();
+        $testListingIds[] = $indId;
+
+        $r15 = posts_files($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token'   => $csrf,
+            'action'       => 'album_add',
+            'profile_id'   => $indId,
+            'album_photos' => [$pngPath],
+        ]);
+        $indRows = (int) $pdo->query("SELECT COUNT(*) FROM provider_album_images WHERE provider_id = $indId")->fetchColumn();
+        check(
+            'an individual listing is refused a photo album',
+            $r15['status'] === 302 && $indRows === 0,
+            'album rows on an individual listing: ' . $indRows
+        );
+
+        // From here the listing has NO picture of its own, so every
+        // check below is "did a refused upload change nothing?".
+        $coverBefore = (string) ($pdo->query("SELECT profile_picture FROM providers WHERE id = $photoListingId")->fetchColumn() ?: '');
+
+        // --- The floor holds for the album too ----------------------
+        // The listing is right now at the exact state that broke it:
+        // no cover, no account avatar. One album photo is the last
+        // picture on the page, and removing it must be refused.
+        $pdo->prepare('UPDATE users SET profile_picture = NULL WHERE id = :uid')->execute([':uid' => $userId]);
+        $rAlbum = posts_files($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token' => $csrf,
+            'action'     => 'album_add',
+            'profile_id' => $photoListingId,
+            'album_photos' => [$pngPath],
+        ]);
+        $soleId = (int) $pdo->query("SELECT id FROM provider_album_images WHERE provider_id = $photoListingId ORDER BY sort_order, id LIMIT 1")->fetchColumn();
+        $soleName = (string) ($pdo->query("SELECT image_name FROM provider_album_images WHERE id = $soleId")->fetchColumn() ?: '');
+        if ($soleName !== '') {
+            $photoFiles[] = $soleName;
+        }
+
+        $d18 = [];
+        $r18 = render_post($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token' => $csrf,
+            'action'     => 'album_remove',
+            'profile_id' => $photoListingId,
+            'image_id'   => $soleId,
+        ], $d18);
+        $afterSole = (int) $pdo->query("SELECT COUNT(*) FROM provider_album_images WHERE provider_id = $photoListingId")->fetchColumn();
+        check(
+            'the last ALBUM photo cannot be removed either',
+            $r18['status'] === 302 && $afterSole === 1 && is_file($uploadDir . '/' . $soleName),
+            'album rows after the attempt: ' . $afterSole . ', file still there: '
+                . (is_file($uploadDir . '/' . $soleName) ? 'yes' : 'no')
+        );
+
+        // Back to the account avatar so the rest of the section runs on
+        // a listing with a real fallback picture.
+        $pdo->prepare('UPDATE users SET profile_picture = :pic WHERE id = :uid')
+            ->execute([':pic' => $testAvatarName, ':uid' => $userId]);
+
+        // --- A forged token uploads nothing -------------------------
+        $r16 = posts_files($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token'   => 'not-a-real-token',
+            'action'       => 'cover',
+            'profile_id'   => $photoListingId,
+            'cover_photo' => $pngPath,
+        ]);
+        $forgedPic = (string) ($pdo->query("SELECT profile_picture FROM providers WHERE id = $photoListingId")->fetchColumn() ?: '');
+        check(
+            'a forged token uploads nothing',
+            $r16['status'] === 302 && $forgedPic === $coverBefore,
+            'profile_picture went "' . $coverBefore . '" -> "' . $forgedPic . '"'
+        );
+
+        // --- A file that is not an image is refused ---------------
+        $txtPath = tempnam(sys_get_temp_dir(), 'isla_txt_');
+        file_put_contents($txtPath, '<?php echo "not an image";');
+        $r17 = posts_files($base . '/upload_listing_photos.php', $sid, [
+            'csrf_token'   => $csrf,
+            'action'       => 'cover',
+            'profile_id'   => $photoListingId,
+            'cover_photo' => $txtPath,
+        ]);
+        $txtRejected = (string) ($pdo->query("SELECT profile_picture FROM providers WHERE id = $photoListingId")->fetchColumn() ?: '');
+        @unlink($txtPath);
+        check(
+            'a renamed text file is refused (getimagesize reads the content)',
+            $r17['status'] === 302 && $txtRejected === $coverBefore,
+            'profile_picture went "' . $coverBefore . '" -> "' . $txtRejected . '"'
+        );
+
+        // --- The panel renders the controls it just used ------------
+        $islaDiag = [];
+        $islaPage = render_get($base . '/dashboard.php?tab=isla', $sid, $islaDiag);
+        check(
+            'the isla panel renders a picture control and the album counter',
+            $islaPage['status'] === 200
+                && strpos($islaPage['body'], 'name="cover_photo"') !== false
+                && strpos($islaPage['body'], 'name="album_photos[]"') !== false
+                && strpos($islaPage['body'], 'prov-album-count') !== false
+                && !$islaDiag,
+            $islaDiag ? implode(' | ', $islaDiag) : 'the photo controls did not render'
+        );
+    }
+
+    // The throwaway listings and every file this section wrote are
+    // dropped by the shutdown handler above, which is deliberately the
+    // only cleanup path so that a fatal error in the checks below cannot
+    // leave them in the real database. Nothing to do here.
+
+    // --- 6. Login throttling ------------------------------------
     // Failed sign-in attempts are counted in the login_attempts
     // table (one counter per account, one per IP) and the login page
     // refuses an attempt that is still inside its backoff. These
