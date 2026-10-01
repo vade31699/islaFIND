@@ -369,11 +369,20 @@ check(
     (bool) preg_match('/\.pm-head \.pm-name-row \.inline-save \{[^}]*margin-left:\s*auto;/s', $cssSrc)
         && (bool) preg_match('/\.pm-name-row \{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/s', $cssSrc)
 );
-// The Home feed cards carry the same pill in their header row.
+// The Home feed cards carry the same pill in their header row — but their
+// row must NEVER wrap, unlike the directory card above. A .feed-rail card
+// is only 78% wide, so the wrap dropped the heart onto a second, right-
+// aligned line and the pill sat one row LOWER than the name: the first
+// card in the Home feed read as misaligned next to every other one that
+// still fitted on a single line. The head yields instead (min-width:0, and
+// the name/badge wrap inside their own column via the h5's overflow-wrap),
+// while flex-shrink:0 on the pill keeps its tap target.
 check(
-    'style.css pins the feed card heart beside the name too',
-    (bool) preg_match('/\.feed-card-top \{[^}]*flex-wrap:\s*wrap;/s', $cssSrc)
+    'style.css pins the feed card heart on the name row',
+    (bool) preg_match('/\.feed-card-top \{[^}]*flex-wrap:\s*nowrap;/s', $cssSrc)
         && (bool) preg_match('/\.feed-card-top \.inline-save \{[^}]*margin-left:\s*auto;/s', $cssSrc)
+        && (bool) preg_match('/\.feed-card-head \{[^}]*min-width:\s*0;/s', $cssSrc)
+        && (bool) preg_match('/\.feed-card-head h5 \{[^}]*overflow-wrap:\s*break-word;/s', $cssSrc)
 );
 // A feed card is itself a click/keydown target, so the heart inside it needs
 // the card's own wiring to step aside — otherwise tapping Save would submit
@@ -760,23 +769,26 @@ check(
         && strpos($reportingHandlerSrc = (string) file_get_contents($web . '/report_listing.php'), 'name="category"') === false
         && strpos($reportingHandlerSrc, "selected_title") !== false
 );
+// The report control is LABELLED: the quiet grey warning triangle it used
+// to show read as chrome, so a member who had actually been scammed by a
+// listing never recognised the way to tell anyone. The word carries the
+// meaning; title/aria-label still spell out WHAT gets reported.
 check(
-    'the report button is icon-only, and still named for a screen reader',
+    'the report button is labelled and still named for a screen reader',
     preg_match('/id="pmReport"[^>]*aria-label="Report this listing"/', $dashboard) === 1
         && strpos($dashboard, 'title="Report this listing"') !== false
-        && preg_match('/id="pmReport"[^>]*>\s*<svg\b[^>]*>\s*<path d="M10\.29 3\.86/', $dashboard) === 1
 );
-// A triangle with an exclamation point, not a word: the label is gone from
-// the button's own text content, so nothing between the tags but the glyph.
-// The match has to start at the <button, not at id="pmReport" — strip_tags
-// only removes a tag it can see the opening angle bracket of, so a match
-// that begins mid-tag leaves the attributes behind as "text".
+// The WORD, not the glyph: the triangle would be a second, redundant
+// signal beside the label, and it is the label's width that costs the name
+// row room. The match has to start at the <button, not at id="pmReport" —
+// strip_tags only removes a tag it can see the opening angle bracket of, so
+// a match that begins mid-tag leaves the attributes behind as "text".
 check(
-    'the report button shows the warning triangle, with no word on it',
+    'the report button shows the word, with no warning triangle left',
     preg_match('#<button[^>]*\bid="pmReport".*?</button>#s', $dashboard, $pmReportTag) === 1
-        && trim(strip_tags($pmReportTag[0])) === ''
-        && strpos($pmReportTag[0], '<line') !== false,
-    'the button still carries text: ' . trim(strip_tags($pmReportTag[0] ?? ''))
+        && trim(strip_tags($pmReportTag[0])) === 'Report'
+        && strpos($pmReportTag[0], '<svg') === false,
+    'the button carries: ' . trim(strip_tags($pmReportTag[0] ?? ''))
 );
 check(
     'the report button is wired to open the report modal, and never for your own listing',
@@ -793,6 +805,14 @@ check(
     'style.css styles the report button and modal',
     strpos($cssSrc, '.btn-report {') !== false
         && strpos($cssSrc, '.report-modal-card {') !== false
+);
+// ...and paints it in the danger red, the same #d0342c .btn-danger uses for
+// Logout / Revoke / Delete — the report has to be the most findable thing in
+// the name row, not the quietest one it used to be.
+check(
+    'style.css paints the report button in the danger red',
+    (bool) preg_match('/\.btn-report \{[^}]*color:\s*#d0342c;/s', $cssSrc)
+        && (bool) preg_match('/\.btn-report:hover \{[^}]*border-color:\s*#d0342c;/s', $cssSrc)
 );
 check(
     'report_listing.php exists and refuses to run on a GET',

@@ -2714,11 +2714,16 @@ body {
     display: flex;
     gap: 12px;
     align-items: center;
-    /* The Save heart rides in this row (see .feed-card-top .inline-save),
-       so the row must be free to wrap: a long business name keeps a
-       readable column instead of being squeezed into a sliver to fit the
-       pill (the same fix .provider-card-top already carries). */
-    flex-wrap: wrap;
+    /* The Save heart rides in this row (see .feed-card-top .inline-save) and
+       must stay ON the name's row: the row never wraps. A narrow rail card
+       (a .feed-rail card is 78% wide) has far less room than a catalogue or
+       Saved card, so allowing the wrap dropped the heart onto its own
+       right-aligned line and the pill sat a row LOWER than the name — the
+       first card in the Home feed read as misaligned next to every other
+       one. The head below absorbs the squeeze instead (min-width:0 lets it
+       shrink, and the name/badge wrap inside their own column), and the
+       heart keeps its full tap target via flex-shrink:0. */
+    flex-wrap: nowrap;
 }
 
 /* Heart BESIDE the name, pinned to the right edge of the row — the same
@@ -2757,6 +2762,10 @@ body {
     margin: 0 0 4px 0;
     font-size: 15px;
     color: #222222;
+    /* A long single word ("ANIKA_RENTALS_AND_COTTAGES") must wrap rather
+       than push the Save heart out of the card now that the row never
+       wraps — the same guard .provider-card-head h5 carries. */
+    overflow-wrap: break-word;
 }
 
 /* "On the Job" status bar: bleeds across the top of the feed card
@@ -3863,6 +3872,11 @@ body {
     margin: 0;
     flex: 1 1 auto;      /* the name yields the row to the pill */
     min-width: 0;
+    /* The name is squeezed down to whatever the two pills leave (Save and,
+       since it got its label, a wider Report), so a single long word —
+       "ANIKA_RENTALS_AND_COTTAGES" — must break rather than run under them.
+       The same guard .provider-card-head h5 and .feed-card-head h5 carry. */
+    overflow-wrap: break-word;
 }
 
 /* margin-left:auto pins the heart to the right edge of the name row when
@@ -3876,32 +3890,28 @@ body {
 /* The Report pill shares the name row with that heart, so it drops the
    full-width .btn-report treatment below (which is sized for the stacked
    .pm-actions column) and becomes a pill of the SAME geometry as .save-btn
-   — same height, same border, same radius — so the two controls read as
-   one pair rather than as a stray button that got promoted.
+   — same height, same border, same radius, same 12px label — so the two
+   controls read as one pair rather than as a stray button that got
+   promoted.
 
-   The pill is ICON ONLY (see the button's comment in dashboard.php for
-   why), so the horizontal padding is just enough to make it a rounded
-   square instead of a letterbox around a 15px glyph.
+   The label is the word "Report" (see the button's comment in
+   dashboard.php for why the warning glyph went), so the padding matches
+   .save-btn's rather than the rounded-square tile the icon needed.
 
    width:auto and min-height:0 both have to be stated: .btn sets
    width:100% and a 48px touch target, which in a flex row would stretch
    the pill across the whole modal and push the heart off screen. The
-   resulting target is ~35x31px rather than the 48px .btn asks for —
-   deliberately, because a 48px square next to a 29px-tall heart would
+   resulting target is ~31px tall rather than the 48px .btn asks for —
+   deliberately, because a 48px pill next to a 29px-tall heart would
    unbalance the row, and this is a control nobody taps by accident. */
 .pm-head .pm-name-row .btn-report {
     width: auto;
     min-height: 0;
     margin: 0;
-    padding: 7px 10px;
+    padding: 7px 12px;
     border-radius: 999px;
+    font-size: 12px;
     flex-shrink: 0;
-}
-
-.pm-head .pm-name-row .btn-report svg {
-    width: 15px;
-    height: 15px;
-    flex: 0 0 15px;
 }
 
 /* The report modal's "here is what you are reporting" line: the listing
@@ -4185,18 +4195,27 @@ body {
    Two new pieces: the quiet "Report" button in the detail
    modal, and the report form's own card.
 
-   The button is deliberately the plainest control in the modal. A
-   member who trusted a listing should never feel nudged away from it,
-   so it is outline grey with no colour of its own — a listing with a
-   problem should look the same as one without until you go looking
-   for the report. The sizes below suit a stacked action column; the
-   name row overrides them for its own pill (see
-   .pm-name-row .btn-report). */
+   The button is RED on purpose, and that is a deliberate reversal of the
+   grey outline it used to wear. The old reasoning was that a member who
+   trusted a listing should never feel nudged away from it, so the report
+   was the plainest control in the modal. In practice a quiet grey control
+   went unnoticed: a member who had actually been scammed did not realise
+   the app gave them a way to say so, which is the whole point of having
+   one. #d0342c is the app's danger red (see .btn-danger) — the same
+   colour that means Logout / Revoke / Delete — so "this is the serious
+   one" reads instantly. The outline-first treatment is kept from
+   .btn-danger: red text on a white pill, filling in on hover, which is
+   loud enough to be found without turning the modal into a warning sign.
+   What follows is the button's DEFAULT look: the red that names it, plus
+   the sizes of a full-width action-column button, which is what the
+   control was before it moved up beside the name. The name row overrides
+   the geometry for its own pill (see .pm-name-row .btn-report) and keeps
+   only the colour. */
 .btn-report {
-    background: transparent;
-    color: #7b8794;
-    border: 1px solid #dfe4e9;
-    font-weight: 600;
+    background: var(--surface);
+    color: #d0342c;
+    border: 1px solid #f0b3ae;
+    font-weight: 700;
     font-size: 13px;
     padding: 10px 16px;
     border-radius: 10px;
@@ -4210,15 +4229,9 @@ body {
 }
 
 .btn-report:hover {
-    background: #f4f6f8;
-    color: #52606d;
-    border-color: #cdd5dc;
-}
-
-.btn-report svg {
-    width: 15px;
-    height: 15px;
-    flex-shrink: 0;
+    background: #fdeceb;
+    color: #b02a23;
+    border-color: #d0342c;
 }
 
 .report-modal-card {

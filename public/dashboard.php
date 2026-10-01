@@ -2376,27 +2376,29 @@ include __DIR__ . '/../include/head_meta.php';
                              button it is hidden on your OWN listing — you
                              cannot report yourself (report_listing.php
                              refuses it anyway, this just keeps the control
-                             off your screen). It keeps the plain
-                             .btn-report look: quiet grey outline, no
-                             colour of its own, because a member who
-                             trusted the listing should not be nudged away
-                             from it by the one control that acts against
-                             it.
+                             off your screen).
 
-                             ICON ONLY, and that is deliberate. A labelled
-                             "Report" button sitting in the row a member
-                             reads as a verdict on the listing they just
-                             opened — the warning triangle says "something
-                             here may be wrong" without making the member
-                             the accuser, and it takes a third of the width
-                             the word needed. The name moves onto
-                             title/aria-label, so the control is still
-                             named for a screen reader, for a long-press
-                             tooltip, and for anyone who cannot tell a
-                             warning glyph from a bookmark. -->
+                             LABELLED and RED, on purpose. It used to be a
+                             quiet grey warning triangle, on the theory that
+                             a member who trusted the listing should not be
+                             nudged away from it by the one control that
+                             acts against it. The glyph turned out to read
+                             as chrome: a member with a real problem did
+                             not recognise it as the way to reach a human,
+                             so the word "Report" names the control
+                             outright and the app's danger red (the same
+                             #d0342c .btn-danger uses for Logout / Revoke
+                             / Delete) makes it impossible to miss.
+                             title/aria-label still say WHAT gets reported,
+                             which the bare word alone does not.
+
+                             The word costs about 35px more width in the
+                             name row than the glyph did; .pm-name-row
+                             wraps the pills onto their own line when the
+                             name needs the room, so nothing is squeezed. -->
                         <button type="button" class="btn btn-report" id="pmReport" hidden
                                 title="Report this listing" aria-label="Report this listing">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            Report
                         </button>
                     </div>
                     <div class="pm-tags">
