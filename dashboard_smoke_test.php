@@ -651,7 +651,18 @@ check(
     strpos($dashboard, 'data-listing-photo-form') !== false
         && strpos($dashboard, 'name="action" value="cover"') !== false
         && strpos($dashboard, 'name="cover_photo" accept="image/jpeg,image/png"') !== false
-        && strpos($dashboard, 'name="remove_cover" value="1"') !== false
+);
+// The "Use my account picture instead" control is GONE from the card: under
+// "Change picture" it read as a second, competing action for the same thing.
+// The endpoint is untouched — upload_listing_photos.php still accepts
+// remove_cover and still refuses to strip the last picture, and
+// render_smoke_test.php posts that action directly — so this is a UI
+// removal only. The orphan CSS went with it, and none of it may drift back.
+check(
+    'the account-picture fallback control is gone from the listing card',
+    strpos($dashboard, 'name="remove_cover"') === false
+        && strpos($dashboard, 'Use my account picture instead') === false
+        && strpos($cssSrc, '.prov-photo-remove') === false
 );
 check(
     'the business card manages an album of up to 5, one file per tap allowed in a batch',

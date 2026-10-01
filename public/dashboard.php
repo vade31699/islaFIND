@@ -1647,21 +1647,6 @@ include __DIR__ . '/../include/head_meta.php';
                                                 one on your account.
                                             </span>
                                         </div>
-                                    <?php elseif ($hasOwnPic): ?>
-                                        <!-- Only offered when removing it would
-                                             leave the listing with a picture
-                                             (the album or the account avatar);
-                                             the handler refuses the last one
-                                             regardless. -->
-                                        <form action="upload_listing_photos.php" method="POST" class="prov-photo-remove">
-                                            <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
-                                            <input type="hidden" name="action" value="cover">
-                                            <input type="hidden" name="profile_id" value="<?php echo (int) $myProvider['id']; ?>">
-                                            <input type="hidden" name="remove_cover" value="1">
-                                            <button type="submit" class="prov-photo-remove-btn">
-                                                Use my account picture instead
-                                            </button>
-                                        </form>
                                     <?php endif; ?>
                                     <!-- Rating for this specific profile -->
                                     <div class="card-rating">

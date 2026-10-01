@@ -4911,24 +4911,6 @@ body {
     cursor: wait;
 }
 
-.prov-photo-remove {
-    margin: 8px 0 0;
-}
-
-.prov-photo-remove-btn {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: #5b7a6d;
-    font-size: 11px;
-    text-decoration: underline;
-    cursor: pointer;
-}
-
-.prov-photo-remove-btn:hover {
-    color: var(--coral-dark);
-}
-
 /* "No picture yet" reuses the missing-map-pin notice's shape, because
    it means the same thing to an owner: a listing that cannot yet be
    acted on in the directory. */
