@@ -9,7 +9,8 @@
 //   2. Settings menu   — hub listing the sub-sections
 //   3. Profile         — avatar, info, picture upload, logout
 //   4. islaFIND Profile — the user's provider listings
-//   5. Privacy & Sec.  — change password + MFA toggle
+//   5. Privacy & Sec.  — the settings hub: change email, change
+//                        password, MFA, device logins, delete account
 //   6. My Jobs         — service contracts where the user is the
 //                        provider (accept/decline, complete jobs)
 // Tapping the bottom "Settings" nav opens the menu hub; each
@@ -32,6 +33,15 @@ if (!isset($_SESSION['user_id'])) {
 require_once __DIR__ . '/../include/db.php';
 require_once __DIR__ . '/../include/categories.php';
 require_once __DIR__ . '/../include/uploads.php';
+require_once __DIR__ . '/../include/reporting.php';   // the report reasons offered in the modal
+require_once __DIR__ . '/../include/mailer.php';      // the e-mail-change code (6e)
+
+// How long the 6-digit "confirm your new address" code stays valid.
+// Deliberately the same 2 minutes as CODE_TTL in login.php: this code
+// authorizes moving the sign-in identity, so it is held to the same
+// window as every other one-time code in the app rather than being
+// quietly given longer.
+const EMAIL_CHANGE_TTL = 120;
 
 // --- 4. Load the user's CURRENT row from the database ----------
 // (Not just the session copy, so profile picture, MFA state and
@@ -179,6 +189,122 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
                 $errors['isla'] = 'Job not found.';
             }
         }
+    }
+
+    // ==== 6e. Change the sign-in email address --------------------
+    // Deliberately TWO steps, and the row is not written until the
+    // second one passes:
+    //
+    //   1. POST change_email         -> current password + the new
+    //      address. We mail a 6-digit code to the NEW address and park
+    //      it in the session. The users row is untouched.
+    //   2. POST confirm_email_change -> the member types that code.
+    //      Only now is the address swapped.
+    //
+    // Why the new address is proven before the swap rather than after:
+    // the email IS the sign-in identity here (it carries MFA codes and
+    // the reset flow), so committing first and verifying later means a
+    // fat-fingered address immediately locks the owner out of their own
+    // account, with the only way back being support. Verifying first
+    // makes the worst case of a bad request "nothing happened".
+    if (isset($_POST['change_email'])) {
+        $current = $_POST['current_password'] ?? '';
+        $newMail = trim((string) ($_POST['new_email'] ?? ''));
+        $confirm = trim((string) ($_POST['confirm_email'] ?? ''));
+
+        if (!password_verify($current, $user['password_hash'])) {
+            $errors['email'] = 'Your current password is incorrect.';
+        } elseif ($newMail === '') {
+            $errors['email'] = 'New email address is required.';
+        } elseif (!filter_var($newMail, FILTER_VALIDATE_EMAIL)) {
+            $errors['email'] = 'Please enter a valid email address.';
+        } elseif (strlen($newMail) > 255) {
+            $errors['email'] = 'Email must be 255 characters or fewer.';
+        } elseif ($newMail !== $confirm) {
+            $errors['email'] = 'The two email addresses do not match.';
+        } elseif (strcasecmp($newMail, (string) $user['email']) === 0) {
+            $errors['email'] = 'That is already your email address.';
+        } else {
+            // UNIQUE(email) is the real gate, but a duplicate-key
+            // exception would abort the request mid-render and hand
+            // the member a blank page. Ask first, then let the index
+            // be the backstop. Compared case-insensitively because
+            // providers treat local parts that way even though MySQL's
+            // default collation may not.
+            $taken = $pdo->prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(:mail) LIMIT 1');
+            $taken->execute([':mail' => $newMail]);
+
+            if ($taken->fetch()) {
+                $errors['email'] = 'That email address is already in use.';
+            } else {
+                $code = (string) random_int(100000, 999999);
+                $emailed = sendEmailChangeCode($newMail, $code);
+
+                // Kept in the SESSION, not in a form field. A hidden
+                // input would let a member edit the address between
+                // the two steps and have the code for one address
+                // applied to another. The session is the only value
+                // the next request cannot be steered into.
+                $_SESSION['pending_email_change'] = [
+                    'email'     => $newMail,
+                    'code'      => $code,
+                    'expires'   => time() + EMAIL_CHANGE_TTL,
+                    'emailed'   => $emailed,
+                ];
+
+                $messages['email'] = $emailed
+                    ? 'Check ' . $newMail . ' for a 6-digit code, then enter it below to finish changing your email.'
+                    : 'Email is not configured on this server, so here is your code: ' . $code;
+            }
+        }
+    }
+
+    // ---- Step 2: the code came back, so move the address ----------
+    elseif (isset($_POST['confirm_email_change'])) {
+        $pending = $_SESSION['pending_email_change'] ?? null;
+        $code    = trim((string) ($_POST['email_code'] ?? ''));
+
+        if (!$pending || ($pending['expires'] ?? 0) < time()) {
+            unset($_SESSION['pending_email_change']);
+            $errors['email'] = 'That code has expired. Request a new one.';
+        } elseif ($code === '') {
+            $errors['email'] = 'Enter the 6-digit code we emailed you.';
+        } elseif (!hash_equals((string) $pending['code'], $code)) {
+            // Wrong code: the request STAYS pending so a member who
+            // mistypes does not have to start over (and re-request a
+            // mail) for one digit. Only expiry clears it.
+            $errors['email'] = 'That code is not correct.';
+        } else {
+            // Re-check uniqueness at commit time. Between step 1 and
+            // step 2 another account can register the same address,
+            // and email is UNIQUE — the attempt must fail as a
+            // readable message, not as a duplicate-key fatal.
+            $taken = $pdo->prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(:mail) AND id <> :id LIMIT 1');
+            $taken->execute([':mail' => $pending['email'], ':id' => $user['id']]);
+
+            if ($taken->fetch()) {
+                unset($_SESSION['pending_email_change']);
+                $errors['email'] = 'That email address was taken while you were typing. Pick another.';
+            } else {
+                $stmt = $pdo->prepare('UPDATE users SET email = :mail, verification_code = NULL WHERE id = :id');
+                $stmt->execute([':mail' => $pending['email'], ':id' => $user['id']]);
+
+                $user['email'] = $pending['email'];   // keep the local row fresh
+                unset($_SESSION['pending_email_change']);
+
+                // MFA codes and password resets go to this address
+                // from here on, so anything already cached against the
+                // old one is stale.
+                $_SESSION['email'] = $pending['email'];
+                $messages['email'] = 'Your email address is now ' . $pending['email'] . '. Use it to sign in.';
+            }
+        }
+    }
+
+    // ---- Abandoned: drop the pending code and go back to step 1 ----
+    elseif (isset($_POST['cancel_email_change'])) {
+        unset($_SESSION['pending_email_change']);
+        $messages['email'] = 'Cancelled. Enter the address you want to use.';
     }
 
     // ==== 6f. Delete my account (Privacy & Security danger zone) --
@@ -341,7 +467,13 @@ $myContracts = $stmt->fetchAll();
 // The contract is pinned to the EXACT listing the client hired
 // (sc.provider_listing_id), so a person with several islaFIND
 // profiles only ever shows the one that was actually hired — never
-// their other, unrelated listings. The display name falls back to
+// their other, unrelated listings.
+//
+// NOTE: no status filter here, deliberately. The job already happened
+// and the client is owed the ability to rate it even if the listing was
+// blocked afterwards — blocking is about what is advertised going
+// forward, not about erasing a finished transaction. New work is
+// blocked at the point of hiring instead (hire_action.php). The display name falls back to
 // the account name for individual skills listings (providers.name
 // is NULL there — only businesses set their own name), so the
 // prompt never shows a blank label.
@@ -378,6 +510,7 @@ try {
          JOIN providers p ON p.id = sl.provider_id
          JOIN users u     ON u.id = p.user_id
          WHERE sl.user_id = :uid
+           AND p.status = \'active\'
          ORDER BY sl.created_at DESC, p.id DESC'
     );
     $stmt->execute([':uid' => $user['id']]);
@@ -488,14 +621,33 @@ $mfaOpen = isset($errors['mfa']) || isset($messages['mfa']);
 // of dumping the user back on the options list with a hidden error.
 $deleteOpen = isset($errors['delete']);
 
+// Same for Change email. It is ALSO open whenever a code is sitting in
+// the session waiting to be typed: a reload in the middle of step 2 must
+// land back on the code box, not on the options list, or the member loses
+// the address the code was sent to (it lives in the session, not the DOM).
+$pendingEmailChange = $_SESSION['pending_email_change'] ?? null;
+if (($pendingEmailChange['expires'] ?? 0) < time()) {
+    // Expired while they were away. Drop it rather than leaving a code
+    // on record that can no longer be used.
+    unset($_SESSION['pending_email_change']);
+    $pendingEmailChange = null;
+}
+$emailOpen = isset($errors['email']) || isset($messages['email']) || $pendingEmailChange !== null;
+$pendingEmailChangeMail = $pendingEmailChange ? htmlspecialchars((string) $pendingEmailChange['email']) : '';
+
 // Which of the Privacy & Security sub-views should open on load
 // ('' = show the options list). Only one can be open: the chosen
 // option replaces the list entirely.
+//
+// Change email is checked FIRST: it is the one option whose form can be
+// mid-flow on reload, and losing it silently sends a member back to the
+// list with a code they can no longer use.
 $securityView = '';
-if ($passwordOpen)    { $securityView = 'passwordSec'; }
-elseif ($mfaOpen)     { $securityView = 'mfaSec'; }
-elseif ($devicesOpen) { $securityView = 'devicesSec'; }
-elseif ($deleteOpen)  { $securityView = 'deleteSec'; }
+if ($emailOpen)       { $securityView = 'emailSec'; }
+elseif ($passwordOpen) { $securityView = 'passwordSec'; }
+elseif ($mfaOpen)      { $securityView = 'mfaSec'; }
+elseif ($devicesOpen)  { $securityView = 'devicesSec'; }
+elseif ($deleteOpen)   { $securityView = 'deleteSec'; }
 
 // Render the device list once and reuse it in both the Privacy &
 // Security collapsible and the dedicated Device Login panel. Each
@@ -802,8 +954,16 @@ $stmt = $pdo->query(
                      WHERE oj.provider_id = p.user_id AND oj.status = \'accepted\')        AS on_job
      FROM providers p
      JOIN users u ON u.id = p.user_id
+     WHERE p.status = \'active\'
      ORDER BY p.created_at DESC'
 );
+// This ONE query feeds both the Home feed and the catalogue panel, so
+// the status filter here is what keeps a blocked listing out of
+// discovery everywhere. A blocked provider is not "hidden from search"
+// but removed from the island: their card, their deep link and their
+// photos all stop existing for everyone else. They keep full control of
+// the listing from Settings (the query above loads the OWNER's listings,
+// unfiltered, so a blocked owner can still read the reason and fix it).
 $allProviders = $stmt->fetchAll();
 
 // --- 8. Every listing's photo album -----------------------------
@@ -1258,16 +1418,23 @@ include __DIR__ . '/../include/head_meta.php';
                                 <?php else: ?>
                                     <span class="dash-avatar-initials"><?php echo htmlspecialchars($initials ?: '?'); ?></span>
                                 <?php endif; ?>
-                                <!-- Camera hover overlay ("Change photo") -->
-                                <span class="avatar-hover">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                                    Change photo
-                                </span>
+                                <!-- Hover/focus scrim. Deliberately NO icon
+                                     here: the picture badge on the corner
+                                     already says "this is the photo control",
+                                     and a second glyph inside the scrim just
+                                     made the avatar look like a sticker. -->
+                                <span class="avatar-hover" aria-hidden="true">Change photo</span>
                             </button>
 
-                            <!-- Always-visible camera badge on the avatar -->
+                            <!-- Always-visible picture badge. A quiet white
+                                 disc with the picture glyph, not a camera:
+                                 nothing in the app opens a camera, every
+                                 photo action picks a file. The click belongs
+                                 to the avatar button above (the menu it
+                                 opens carries the real labels), so this is
+                                 decorative for assistive tech too. -->
                             <span class="avatar-badge" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.75" cy="8.75" r="1.75"/><path d="M21 15.5l-4.5-4.5L6 21"/></svg>
                             </span>
 
                             <!-- Popup action menu (toggle via JS) -->
@@ -1278,7 +1445,7 @@ include __DIR__ . '/../include/head_meta.php';
                                     Show Profile Picture
                                 </button>
                                 <button type="button" id="uploadPicBtn" role="menuitem">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.75" cy="8.75" r="1.75"/><path d="M21 15.5l-4.5-4.5L6 21"/></svg>
                                     Upload Profile Picture
                                 </button>
                             </div>
@@ -1392,6 +1559,15 @@ include __DIR__ . '/../include/head_meta.php';
                                 $hasNoPicAtAll = !$hasOwnPic && $albumUsed === 0
                                     && trim((string) ($user['profile_picture'] ?? '')) === '';
                                 $provPhone = htmlspecialchars($user['phone'] ?? '');
+                                // A listing removed by a superadmin. The owner
+                                // still sees it here (their own listings are
+                                // loaded unfiltered on purpose) but the island
+                                // does not: it is gone from the feed, the
+                                // catalogue and its deep link. Saying so
+                                // plainly - with the reason - is the only way
+                                // the owner can find out and fix it.
+                                $myListingBlocked = (string) ($myProvider['status'] ?? 'active') !== 'active';
+                                $myBlockedReason  = trim((string) ($myProvider['blocked_reason'] ?? ''));
                                 $avgR = round((float) ($myProvider['avg_rating'] ?? 0), 1);
                                 $revN = (int) ($myProvider['review_count'] ?? 0);
                                 // Initials for the picture placeholder.
@@ -1404,6 +1580,23 @@ include __DIR__ . '/../include/head_meta.php';
                                 }
                                 ?>
                                 <div class="provider-card isla-mine">
+                                    <?php if ($myListingBlocked): ?>
+                                        <div class="listing-blocked-warning" role="status">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+                                            <span>
+                                                <strong>This listing is not visible to anyone right now.</strong>
+                                                <?php if ($myBlockedReason !== ''): ?>
+                                                    An administrator removed it because:
+                                                    <em><?php echo htmlspecialchars($myBlockedReason); ?></em>
+                                                <?php else: ?>
+                                                    An administrator removed it. No reason was given.
+                                                <?php endif; ?>
+                                                Until it is reviewed and restored, it will not appear in
+                                                search or the directory, and new customers cannot find or
+                                                message you through it.
+                                            </span>
+                                        </div>
+                                    <?php endif; ?>
                                     <div class="provider-card-top">
                                         <div class="prov-photo">
                                             <?php if ($provPic): ?>
@@ -1425,8 +1618,9 @@ include __DIR__ . '/../include/head_meta.php';
                                                 <input type="file" name="cover_photo" accept="image/jpeg,image/png" hidden
                                                        aria-label="Choose a picture for this profile">
                                                 <button type="submit" class="prov-photo-btn"
+                                                        aria-label="<?php echo $hasOwnPic ? 'Change this profile picture' : 'Add a picture for this profile'; ?>"
                                                         title="<?php echo $hasOwnPic ? 'Change this profile picture' : 'Add a picture for this profile'; ?>">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.75" cy="8.75" r="1.75"/><path d="M21 15.5l-4.5-4.5L6 21"/></svg>
                                                     <span><?php echo $hasOwnPic ? 'Change picture' : 'Add picture'; ?></span>
                                                 </button>
                                             </form>
@@ -1586,7 +1780,7 @@ include __DIR__ . '/../include/head_meta.php';
                                                     <input type="file" name="album_photos[]" accept="image/jpeg,image/png" multiple
                                                            hidden aria-label="Choose photos to add to this album">
                                                     <button type="submit" class="btn btn-small btn-outline">
-                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.75" cy="8.75" r="1.75"/><path d="M21 15.5l-4.5-4.5L6 21"/></svg>
                                                         Add photo<?php echo $albumSlots === 1 ? '' : 's'; ?>
                                                     </button>
                                                 </form>
@@ -1662,12 +1856,27 @@ include __DIR__ . '/../include/head_meta.php';
                         <h4 class="sec-section">Privacy &amp; Security</h4>
 
                         <!-- ======= Security options list =======
-                             Change Password / MFA / Device Logins are
-                             all styled the same. Tapping an option
+                             Every account setting is its own row here
+                             rather than a shared "Security" form:
+                             Change Email / Change Password / MFA /
+                             Device Logins / Delete Account are all
+                             styled the same, and each is a different
+                             job with a different risk. Tapping one
                              hides this list and shows ONLY that
                              option's content, with a back link to
-                             return to the options. -->
+                             return to the options.
+
+                             Change Email sits ABOVE Change Password
+                             on purpose: the address is what the
+                             password resets and MFA codes are sent
+                             to, so it is the one people come here
+                             for first. -->
                         <div class="sec-block" id="securityOptions"<?php echo $securityView !== '' ? ' hidden' : ''; ?>>
+                            <button type="button" class="collapse-toggle" data-sec-view="emailSec">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2,7 12,13 22,7"/></svg>
+                                <span class="menu-label">Change Email Address</span>
+                                <span class="menu-chevron">&#8250;</span>
+                            </button>
                             <button type="button" class="collapse-toggle" data-sec-view="passwordSec">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                                 <span class="menu-label">Change Password</span>
@@ -1688,6 +1897,90 @@ include __DIR__ . '/../include/head_meta.php';
                                 <span class="menu-label">Delete Account</span>
                                 <span class="menu-chevron">&#8250;</span>
                             </button>
+                        </div>
+
+                        <!-- ======= Change Email Address view =======
+                             Two forms in one view, because the flow is
+                             two steps. Step 2 only renders while a
+                             code is actually pending in the session,
+                             so a member never sees an empty code box
+                             they did not ask for. -->
+                        <div class="sec-block sec-view" id="emailSec"<?php echo $securityView === 'emailSec' ? '' : ' hidden'; ?>>
+                            <button type="button" class="panel-back" data-sec-back>&#8592; Back to security options</button>
+                            <h5>Change Email Address</h5>
+                            <?php if (isset($errors['email'])): ?>
+                                <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['email']); ?></p>
+                            <?php endif; ?>
+                            <?php if (isset($messages['email'])): ?>
+                                <p class="field-ok" role="status"><?php echo htmlspecialchars($messages['email']); ?></p>
+                            <?php endif; ?>
+
+<?php if ($pendingEmailChange === null): ?>
+                            <!-- ===== Step 1: ask for the new address ===== -->
+                            <p class="sec-hint">
+                                Your email address is how you sign in, and where
+                                password resets and security codes are sent.
+                                We will email a 6-digit code to the new address
+                                to confirm you want it — nothing changes until
+                                you enter it.
+                            </p>
+                            <form action="dashboard.php" method="POST" novalidate>
+                                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                <div class="form-group">
+                                    <div class="input-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                        <input type="password" id="email_current_password" name="current_password" autocomplete="current-password" placeholder="Current password" aria-label="Current password">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="input-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2,7 12,13 22,7"/></svg>
+                                        <input type="email" id="new_email" name="new_email" autocomplete="email" placeholder="New email address" aria-label="New email address"
+                                               value="<?php echo htmlspecialchars((string) ($_POST['new_email'] ?? '')); ?>">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="input-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2,7 12,13 22,7"/></svg>
+                                        <input type="email" id="confirm_email" name="confirm_email" autocomplete="email" placeholder="Confirm new email address" aria-label="Confirm new email address">
+                                    </div>
+                                </div>
+                                <button type="submit" name="change_email" value="1" class="btn" data-loading-label="Sending code…">Send confirmation code</button>
+                            </form>
+
+<?php else: ?>
+                            <!-- ===== Step 2: confirm the code that was sent ====
+                                 The address is shown back as plain text, not an
+                                 editable field: it lives in the session, and an
+                                 editable copy is exactly how a code sent to one
+                                 address ends up applied to another. -->
+                            <p class="sec-hint">
+                                Enter the 6-digit code we sent to
+                                <strong><?php echo $pendingEmailChangeMail; ?></strong>.
+                                Your sign-in address stays
+                                <strong><?php echo $email; ?></strong> until you do.
+                            </p>
+                            <form action="dashboard.php" method="POST" novalidate>
+                                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                <div class="form-group">
+                                    <div class="input-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2,7 12,13 22,7"/></svg>
+                                        <input type="text" id="email_code" name="email_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code" aria-label="6-digit confirmation code">
+                                    </div>
+                                </div>
+                                <button type="submit" name="confirm_email_change" value="1" class="btn" data-loading-label="Confirming…">Confirm email address</button>
+                            </form>
+                            <!-- Escape hatch: the address is not theirs, or the code never arrived.
+                                 This is a POST, not a data-sec-back toggle,
+                                 because the pending code lives in the session:
+                                 a client-side hide would leave it armed, and the
+                                 next page load would drop them straight back
+                                 into the code box they just abandoned. -->
+                            <form action="dashboard.php" method="POST" class="sec-cancel">
+                                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                <button type="submit" name="cancel_email_change" value="1" class="btn btn-outline">Use a different address</button>
+                            </form>
+<?php endif; ?>
                         </div>
 
                         <!-- ======= Change Password view ======= -->
@@ -2053,11 +2346,14 @@ include __DIR__ . '/../include/head_meta.php';
             <div class="pm-header">
                 <img src="" alt="" id="pmPic" class="pm-pic">
                 <div class="pm-head">
-                    <!-- Name + Save heart on ONE row (see .pm-name-row in
-                         style.css), so the bookmark sits BESIDE the
-                         listing name exactly like the Save pill on the
-                         directory / Saved cards, instead of being buried
-                         in the action stack at the bottom. -->
+                    <!-- Name + Save heart + Report on ONE row (see
+                         .pm-name-row in style.css). Save and Report are
+                         the only two things a visitor DECIDES about a
+                         listing, and both are answers to "what do I want
+                         to do with this?" — so they belong together at the
+                         top, beside the name, instead of the report being
+                         buried in the action stack at the bottom where a
+                         member in doubt would never scroll to find it. -->
                     <div class="pm-name-row">
                         <h4 id="pmName"></h4>
                         <!-- Save for later: the same POST toggle the
@@ -2075,10 +2371,48 @@ include __DIR__ . '/../include/head_meta.php';
                                 <span id="pmSaveLabel">Save</span>
                             </button>
                         </form>
+                        <!-- Report: opens the report modal below, sitting
+                             right beside the Save heart. Like the Inquire
+                             button it is hidden on your OWN listing — you
+                             cannot report yourself (report_listing.php
+                             refuses it anyway, this just keeps the control
+                             off your screen). It keeps the plain
+                             .btn-report look: quiet grey outline, no
+                             colour of its own, because a member who
+                             trusted the listing should not be nudged away
+                             from it by the one control that acts against
+                             it.
+
+                             ICON ONLY, and that is deliberate. A labelled
+                             "Report" button sitting in the row a member
+                             reads as a verdict on the listing they just
+                             opened — the warning triangle says "something
+                             here may be wrong" without making the member
+                             the accuser, and it takes a third of the width
+                             the word needed. The name moves onto
+                             title/aria-label, so the control is still
+                             named for a screen reader, for a long-press
+                             tooltip, and for anyone who cannot tell a
+                             warning glyph from a bookmark. -->
+                        <button type="button" class="btn btn-report" id="pmReport" hidden
+                                title="Report this listing" aria-label="Report this listing">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        </button>
                     </div>
                     <div class="pm-tags">
                         <span class="provider-badge" id="pmBadge"></span>
-                        <span class="pm-type" id="pmType"></span>
+                        <!-- No "Individual Skills" / "Business" chip here.
+                             The type is a detail the visitor never acts on
+                             and the category badge next to it already
+                             tells them what this listing is, so the type
+                             only added a second grey pill to read. -->
+                        <!-- "On the Job" — an INDIVIDUAL SKILLS listing only,
+                             and only once a hire was ACCEPTED. A business is
+                             never "on a job" (its inquiries stay open), so
+                             this chip must stay hidden for every business
+                             listing. openProviderDetail() drives it from the
+                             card's data-onjob, which is already gated on both
+                             conditions server-side (see feedCardHtml). -->
                         <span class="pm-onjob" id="pmOnJob" hidden>&#128338; On the Job</span>
                     </div>
                 </div>
@@ -2110,20 +2444,16 @@ include __DIR__ . '/../include/head_meta.php';
                      to the business's pin; openProviderDetail() fills the
                      href from the card's data-map-* attributes and hides
                      the button for everything else. -->
-                <!-- The link and its hint travel together: the hint says
-                     WHY the browser may ask for a location (the route is
-                     built from the visitor's own position), so it must
-                     appear and disappear with the button. -->
+                <!-- "Get Directions" stands alone. It used to carry a
+                     "Starts from your location" hint underneath, but the
+                     distance row above already says how far away the shop
+                     is, and the button is self-explanatory: two lines of
+                     chrome for one action is noise in a small modal. -->
                 <div class="pm-route">
                     <a href="#" target="_blank" rel="noopener" class="btn-map" id="pmMap" hidden>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
                         Get Directions
                     </a>
-                    <p class="route-hint" id="pmRouteHint" hidden
-                       title="Your browser may ask for your location once &mdash; the route then starts from wherever you are.">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
-                        <span>Starts from your location</span>
-                    </p>
                 </div>
                 <!-- Profiles cannot be edited from the feed; only the
                      dashboard's islaFIND panel offers that. The Reviews
@@ -2131,7 +2461,82 @@ include __DIR__ . '/../include/head_meta.php';
                      the listing has no reviews yet). -->
                 <button type="button" class="btn btn-inquire" id="pmInquire">Inquire Availability</button>
                 <button type="button" class="btn btn-outline" id="pmReviews">View Reviews</button>
+                <!-- Report is NOT here: it lives in the name row beside
+                     the Save heart, next to #pmReport's old spot. -->
             </div>
+        </div>
+    </div>
+
+    <!-- ============ Report modal (opens from the detail modal) ============
+         Posts to report_listing.php. A plain form post on purpose: the
+         whole flow then works with JavaScript disabled, and the admin
+         queue behind it never depends on a fetch() succeeding.
+
+         The evidence input is OPTIONAL — most reports need no screenshot,
+         and requiring one would lose the reports that are simply "this
+         phone number does not work". -->
+    <div class="modal" id="reportModal" hidden>
+        <div class="modal-backdrop" data-close></div>
+        <div class="modal-card report-modal-card">
+            <button type="button" class="modal-close" data-close aria-label="Close">&times;</button>
+            <h4>Report this listing</h4>
+            <!-- WHAT IS BEING REPORTED, restated. The listing name alone
+                 is ambiguous once a member has a dozen of these open, and
+                 the CATEGORY is the thing an admin triages by — three
+                 reports on "Plumber" pages read very differently from
+                 three on "Hospice". It is the card's own data-title (the
+                 resolved category label, the same string the badge in the
+                 detail modal shows), not a copy chosen from a list, so it
+                 cannot be wrong about which listing this is about.
+
+                 Nothing here is stored from this markup: report_listing.php
+                 reads selected_title off the providers row itself, and the
+                 admin queue already prints it beside the report. This is
+                 shown to the member, not trusted from them. -->
+            <p class="rm-target">
+                <strong id="rmListing">this listing</strong>
+                <span class="provider-badge" id="rmCategory" hidden></span>
+            </p>
+            <p class="sec-hint">
+                Tell us what is wrong with it. An islaFIND
+                admin reviews every report. We never show your details to the listing owner.
+            </p>
+
+            <form action="report_listing.php" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                <input type="hidden" name="provider_id" id="rmProviderId" value="">
+                <input type="hidden" name="return_to" id="rmReturnTo" value="home">
+
+                <div class="form-group">
+                    <label class="field-label" for="rmReason">What is wrong with it?</label>
+                    <select class="field-in" id="rmReason" name="reason_code" required>
+                        <option value="" selected>Choose a reason…</option>
+                        <?php foreach (isla_report_reasons() as $code => $label): ?>
+                            <option value="<?php echo htmlspecialchars($code); ?>"><?php echo htmlspecialchars($label); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="field-label" for="rmDetails">Tell us more <span class="field-counter">(optional)</span></label>
+                    <textarea class="field-in" id="rmDetails" name="details" rows="3" maxlength="2000"
+                              placeholder="Anything that helps an admin understand the problem."></textarea>
+                    <p class="sec-hint" id="rmOtherHint" hidden>
+                        You picked “Something else” — please describe it.
+                    </p>
+                </div>
+
+                <div class="form-group">
+                    <label class="field-label" for="rmEvidence">Add a screenshot <span class="field-counter">(optional)</span></label>
+                    <input class="field-in" type="file" id="rmEvidence" name="evidence" accept="image/jpeg,image/png">
+                    <p class="sec-hint">JPG or PNG, up to 3 MB.</p>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" data-close>Cancel</button>
+                    <button type="submit" class="btn">Send report</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -2371,18 +2776,30 @@ include __DIR__ . '/../include/head_meta.php';
             }
         });
 
+        // ---- One scroll lock for every full-screen overlay --------
+        // Overlays STACK: a photo opens on top of the listing detail
+        // modal. Each one used to add and remove .no-scroll itself,
+        // so closing the photo released the lock the modal behind it
+        // still needed and the page scrolled out from under an open
+        // dialog. One owner, asked the only question that matters —
+        // is ANY overlay still on screen?
+        function syncScrollLock() {
+            const open = document.querySelector('.modal:not([hidden]), .lightbox:not([hidden])');
+            document.body.classList.toggle('no-scroll', !!open);
+        }
+
         // "Show Profile Picture": open the full-size lightbox viewer.
         function openLightbox() {
             const img = avatarBtn.querySelector('img');
             if (!img) return;                 // no picture -> button is disabled anyway
             lightboxImg.src = img.src;        // reuse the avatar's image URL
             lightbox.hidden = false;
-            document.body.classList.add('no-scroll');   // stop page scroll behind it
+            syncScrollLock();
         }
 
         function closeLightbox() {
             lightbox.hidden = true;
-            document.body.classList.remove('no-scroll');
+            syncScrollLock();
         }
 
         showPicBtn.addEventListener('click', openLightbox);
@@ -2452,15 +2869,21 @@ include __DIR__ . '/../include/head_meta.php';
         // lightbox the profile picture uses, so the app has one
         // full-size viewer rather than one per surface. Delegated on the
         // strip, whose contents are replaced on every card opened.
+        // The whole TILE is the target, not just the <img> inside it:
+        // a 64px square with a 1px border leaves almost no slack
+        // around the image, so matching the image alone made the
+        // control feel half-dead on a phone.
         const pmGallery = document.getElementById('pmGallery');
         if (pmGallery) {
             pmGallery.addEventListener('click', function (event) {
-                const img = event.target.closest ? event.target.closest('img') : null;
+                const tile = event.target.closest ? event.target.closest('.pm-gallery-item') : null;
+                if (!tile) return;
+                const img = tile.querySelector('img');
                 if (!img) return;
                 lightboxImg.src = img.src;
                 lightboxImg.alt = 'Listing photo';
                 lightbox.hidden = false;
-                document.body.classList.add('no-scroll');
+                syncScrollLock();
             });
         }
 
@@ -2481,6 +2904,7 @@ include __DIR__ . '/../include/head_meta.php';
         const rateModal     = document.getElementById('rateModal');
         const providerModal = document.getElementById('providerModal');
         const reviewsModal  = document.getElementById('reviewsModal');
+        const reportModal   = document.getElementById('reportModal');
 
         // Escape user text before injecting it into the detail modal
         // (descriptions come from the providers table).
@@ -2498,19 +2922,80 @@ include __DIR__ . '/../include/head_meta.php';
 
         function openModal(modal) {
             modal.hidden = false;
-            document.body.classList.add('no-scroll');
+            syncScrollLock();
         }
         function closeModals() {
             inquiryModal.hidden  = true;
             rateModal.hidden     = true;
             providerModal.hidden = true;
             reviewsModal.hidden  = true;
-            document.body.classList.remove('no-scroll');
+            reportModal.hidden   = true;
+            syncScrollLock();
         }
 
         // The provider currently shown in the detail modal, so the
         // Inquire button knows who to message.
         let currentProvider = null;
+
+        // ---- Reporting a listing -------------------------------
+        // Set by openProviderDetail() every time the detail modal opens,
+        // so "Report listing" always knows which listing it is about
+        // without having to re-read the DOM.
+        let reportingTarget = null;
+
+        const pmReportBtn = document.getElementById('pmReport');
+        const rmListing   = document.getElementById('rmListing');
+        const rmProviderId = document.getElementById('rmProviderId');
+        const rmReturnTo  = document.getElementById('rmReturnTo');
+        const rmReason    = document.getElementById('rmReason');
+        const rmOtherHint = document.getElementById('rmOtherHint');
+        const rmCategory  = document.getElementById('rmCategory');
+
+        pmReportBtn.addEventListener('click', function () {
+            if (!reportingTarget) return;
+
+            // Start from a blank form every time — a half-typed report
+            // left over from a previous listing is worse than an empty
+            // one, and the file input must be cleared explicitly because
+            // browsers keep a selected file across a hidden/shown cycle.
+            //
+            // RESET FIRST, THEN FILL. form.reset() puts every control back
+            // to its markup default, and rmProviderId's default is empty,
+            // so setting the values first and resetting afterwards would
+            // quietly submit a report with no listing attached (which the
+            // server rejects as "Which listing?"). The order is the whole
+            // trick here.
+            reportModal.querySelector('form').reset();
+            rmOtherHint.hidden = true;
+
+            // Now the per-listing details, then SWAP modals: the detail
+            // modal closes first so the two are never stacked, which is
+            // what keeps a long report form from sitting inside the
+            // listing card's scroll box.
+            rmListing.textContent = reportingTarget.name;
+            rmProviderId.value = reportingTarget.id;
+            rmReturnTo.value  = reportingTarget.back;
+
+            // Restate the category so the member is reporting the thing
+            // they think they are (and so an admin triaging a queue of
+            // near-identical names can see the trade at a glance). Written
+            // AFTER the reset above like the id, because the badge is
+            // cleared the same way — a category left over from the last
+            // report would be worse than none at all.
+            const rmCat = reportingTarget.cat;
+            rmCategory.textContent = rmCat;
+            rmCategory.hidden = rmCat === '';
+
+            providerModal.hidden = true;
+            openModal(reportModal);
+        });
+
+        // "Something else" needs a description, so ask for one as soon as
+        // it is chosen. report_listing.php enforces this on the server;
+        // this is only the earlier, friendlier warning.
+        rmReason.addEventListener('change', function () {
+            rmOtherHint.hidden = rmReason.value !== 'other';
+        });
 
         // ---- Distance + travel time to a pinned business ----------
         // Answers "how far am I from this shop?" with the visitor's own
@@ -2738,8 +3223,6 @@ include __DIR__ . '/../include/head_meta.php';
             currentProvider = { id: card.dataset.id, name: card.dataset.name };
             document.getElementById('pmName').textContent = card.dataset.name;
             document.getElementById('pmBadge').textContent = card.dataset.title;
-            document.getElementById('pmType').textContent =
-                card.dataset.type === 'individual' ? 'Individual Skills' : 'Business';
 
             // Photo (hidden when neither the listing nor the account
             // has one).
@@ -2824,16 +3307,12 @@ include __DIR__ . '/../include/head_meta.php';
             // google_maps_url for the same reason: the stored link is
             // exactly the destination-only form being fixed here.
             const mapBtn = document.getElementById('pmMap');
-            const mapHint = document.getElementById('pmRouteHint');
             const mapLat = card.dataset.mapLat || '';
             const mapLng = card.dataset.mapLng || '';
             const openCardId = card.dataset.id;
             if (card.dataset.type === 'business' && mapLat !== '' && mapLng !== '') {
                 mapBtn.href = routeDirectionsUrl(mapLat, mapLng);
                 mapBtn.hidden = false;
-                // The hint explains why the browser may ask for a
-                // location, so it lives and dies with the button.
-                mapHint.hidden = false;
 
                 getMyPosition().then(function (coords) {
                     // The guard stops a fix that lands late from
@@ -2844,7 +3323,6 @@ include __DIR__ . '/../include/head_meta.php';
                 });
             } else {
                 mapBtn.hidden = true;
-                mapHint.hidden = true;
                 mapBtn.removeAttribute('href');
             }
 
@@ -2858,6 +3336,28 @@ include __DIR__ . '/../include/head_meta.php';
             // never from the feed). The Reviews button stays for all.
             const isOwn = card.dataset.own === '1';
             document.getElementById('pmInquire').hidden = isOwn;
+
+            // Report: same rule as Inquire — you cannot report your own
+            // listing. The server refuses it either way; hiding it keeps
+            // the control off a screen where it could never be used.
+            document.getElementById('pmReport').hidden = isOwn;
+
+            // Remember which listing the report modal is about, so the
+            // button knows where to send the report and what to name.
+            // return_to is always 'home', exactly like the Save form above:
+            // every path that reaches this modal lives on the Home tab
+            // (the catalogue is a Home panel), so that is where the
+            // confirmation belongs.
+            reportingTarget = {
+                id:   card.dataset.id,
+                name: card.dataset.name || 'this listing',
+                // The resolved category label (data-title), which is what
+                // the badge above the report form shows. Empty is fine —
+                // the modal simply omits the badge rather than printing a
+                // blank pill.
+                cat:  card.dataset.title || '',
+                back: 'home'
+            };
 
             // Save heart: hidden on your own listing (the server refuses
             // those too), otherwise painted from the card's data-saved
@@ -3587,11 +4087,16 @@ include __DIR__ . '/../include/head_meta.php';
 
         // ============================================================
         // Privacy & Security sub-views.
-        // The options list (Change Password / MFA / Device Logins)
-        // shows only the three choices. Tapping one hides the whole
-        // list and shows ONLY that option's content; "Back to security
-        // options" returns to the list. Only one view is visible at a
-        // time — choosing an option makes the others disappear.
+        // The options list shows one row per setting (Change Email /
+        // Change Password / MFA / Device Logins / Delete Account).
+        // Tapping one hides the whole list and shows ONLY that option's
+        // content; "Back to security options" returns to the list. Only
+        // one view is visible at a time — choosing an option makes the
+        // others disappear.
+        //
+        // Driven entirely by data-sec-view / data-sec-back and the
+        // .sec-view class, so a new option needs a row and a view and
+        // nothing in here.
         // ============================================================
 
         function showSecurityView(viewId) {

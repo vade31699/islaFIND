@@ -252,7 +252,11 @@ check(
 );
 $nameAt   = strpos($dashboard, "'<h5>' . \$nameHtml . '</h5>'");
 // The USAGE (. $saveControl), not the assignment further up the file.
-$saveAt   = strpos($dashboard, ". \$saveControl\n");
+// Deliberately matched without the trailing newline: these sources are
+// checked out with CRLF on Windows, and a "\n" in the needle silently
+// stops matching - the assertion then fails for a line-ending reason and
+// looks like a layout regression.
+$saveAt   = strpos($dashboard, '. $saveControl');
 $ratingAt = strpos($dashboard, '. $ratingRow');
 check(
     'feedCardHtml puts Save beside the name, above the rating row',
@@ -340,24 +344,22 @@ check(
     'the route button says what it does (Get Directions)',
     (bool) preg_match('/Get Directions\s*<\/a>/', $dashboard)
 );
-// The hint above the location prompt: it must exist, or visitors are
-// prompted with no explanation of why.
+// The "Starts from your location" hint and its .route-hint styling were
+// removed on purpose: the distance row above the button already says how
+// far away the shop is, so the hint was two lines of chrome for an action
+// the button names plainly. These checks now assert the hint's MARKUP and
+// JS STAY gone, so it cannot drift back in unnoticed. (The phrase itself
+// is deliberately not banned: the removal is explained in a comment.)
 check(
-    'the route button explains the location prompt ("Starts from your location")',
-    substr_count($dashboard, 'Starts from your location') === 1
-        && substr_count($dashboard, 'id="pmRouteHint"') === 1
-        && strpos($dashboard, 'class="route-hint"') !== false
-);
-check(
-    'the modal hint hides and shows with the button',
-    strpos($dashboard, "document.getElementById('pmRouteHint')") !== false
-        && preg_match('/mapHint\.hidden = false;/', $dashboard)
-        && preg_match('/mapHint\.hidden = true;/', $dashboard)
+    'the removed route hint does not creep back in',
+    substr_count($dashboard, 'id="pmRouteHint"') === 0
+        && substr_count($dashboard, 'mapHint.') === 0
+        && strpos($dashboard, 'class="route-hint"') === false
 );
 $cssSrc = (string) file_get_contents($web . '/style.css');
 check(
-    'style.css styles the route hint',
-    strpos($cssSrc, '.route-hint {') !== false
+    'style.css has no orphan rule for the removed route hint',
+    strpos($cssSrc, '.route-hint') === false
 );
 // The modal heart is pinned to the right edge of the name row the same
 // way the card's pill is (margin-left:auto), and the name is allowed to
@@ -673,6 +675,132 @@ check(
         && strpos($cssSrc, '.prov-album-grid {') !== false
         && strpos($cssSrc, '.prov-album-count {') !== false
         && strpos($cssSrc, '.prov-album-del {') !== false
+);
+
+// ---------- Reporting a listing ----------
+// The report UI is the one thing a member uses to reach a human, so
+// the checks here are about it actually WORKING rather than merely
+// existing: a button that posts to a handler that is not there, or a
+// form that submits an empty listing id, both render perfectly and
+// both fail silently for the member.
+check(
+    'the listing detail modal carries a Report button, hidden until the modal opens',
+    substr_count($dashboard, 'id="pmReport"') === 1
+        && preg_match('/id="pmReport"[^>]*\bhidden\b/', $dashboard) === 1
+        && strpos($dashboard, 'class="btn btn-report"') !== false
+);
+check(
+    'the report modal has a reason, a note and an optional screenshot',
+    substr_count($dashboard, 'id="reportModal"') === 1
+        && preg_match('/<select[^>]*id="rmReason"/', $dashboard) === 1
+        && preg_match('/name="reason_code"/', $dashboard) === 1
+        && preg_match('/<textarea[^>]*name="details"/', $dashboard) === 1
+        && preg_match('/name="evidence"/', $dashboard) === 1
+        && strpos($dashboard, 'accept="image/jpeg,image/png"') !== false
+);
+// The reasons offered must come from the SAME function the handler
+// validates against. Listing the codes twice would be the thing that
+// drifts — one list gains a reason, the other does not, and the UI
+// offers an option the server rejects. Rendering the options from the
+// whitelist makes that impossible, so that is what is asserted here.
+$reportingSrc = (string) file_get_contents(__DIR__ . '/include/reporting.php');
+$reportHandlerSrc = (string) file_get_contents($web . '/report_listing.php');
+check(
+    'the reason list has one source: the modal and the handler share it',
+    preg_match('/function isla_report_reasons\(\)/', $reportingSrc) === 1
+        && strpos($dashboard, 'foreach (isla_report_reasons() as $code => $label)') !== false
+        && strpos($reportHandlerSrc, 'isla_report_reasons()') !== false
+);
+// ...and the handler really does reject anything outside it.
+check(
+    'the handler refuses a reason that is not on the list',
+    strpos($reportHandlerSrc, 'array_key_exists($reasonCode, isla_report_reasons())') !== false
+);
+check(
+    'the report form posts to report_listing.php with a CSRF token',
+    preg_match('#<form[^>]*action="report_listing\.php"[^>]*method="POST"#', $dashboard) === 1
+        && strpos($dashboard, 'name="csrf_token" value="<?php echo $csrf; ?>"') !== false
+);
+// THE ORDERING BUG THIS EXISTS TO CATCH: form.reset() restores every
+// control to its markup default, and the hidden listing-id input's
+// default is empty. Setting the id and then resetting would submit
+// "Which listing?" with a perfectly valid-looking form, and nothing
+// else in the suite would notice.
+$resetAt  = strpos($dashboard, "reportModal.querySelector('form').reset()");
+$fillAt   = strpos($dashboard, 'rmProviderId.value = reportingTarget.id');
+check(
+    'the report form is reset BEFORE the listing id is filled in',
+    $resetAt !== false && $fillAt !== false && $resetAt < $fillAt,
+    $resetAt === false || $fillAt === false
+        ? 'reset at ' . var_export($resetAt, true) . ', fill at ' . var_export($fillAt, true)
+        : 'reset at ' . $resetAt . ' comes after the fill at ' . $fillAt
+);
+// The category badge in the report modal has the SAME ordering trap as the
+// listing id: a value left over from the previously reported listing is
+// worse than none, because the member would be told they are reporting
+// "Plumber" while the admin reads a "Hospice" page. The fill must sit
+// after the reset, exactly like rmProviderId's does.
+$catFillAt = strpos($dashboard, 'rmCategory.textContent = rmCat');
+check(
+    'the report modal names the listing category, cleared before it is refilled',
+    preg_match('/id="rmCategory"[^>]*\bhidden\b/', $dashboard) === 1
+        && $catFillAt !== false && $resetAt !== false && $resetAt < $catFillAt
+        && strpos($dashboard, 'cat:  card.dataset.title') !== false,
+    $catFillAt === false
+        ? 'the category is never filled into #rmCategory'
+        : 'the category is filled at ' . $catFillAt . ', after the reset at ' . $resetAt
+);
+// The category must come from the CARD the member actually opened, and not
+// from a form field they could have tampered with: report_listing.php reads
+// selected_title off the providers row itself, so this badge is display
+// only and the server never has to trust it.
+check(
+    'the category shown in the report modal is the card\'s own, not a posted field',
+    strpos($dashboard, '<span class="provider-badge" id="rmCategory" hidden></span>') !== false
+        && strpos($reportingHandlerSrc = (string) file_get_contents($web . '/report_listing.php'), 'name="category"') === false
+        && strpos($reportingHandlerSrc, "selected_title") !== false
+);
+check(
+    'the report button is icon-only, and still named for a screen reader',
+    preg_match('/id="pmReport"[^>]*aria-label="Report this listing"/', $dashboard) === 1
+        && strpos($dashboard, 'title="Report this listing"') !== false
+        && preg_match('/id="pmReport"[^>]*>\s*<svg\b[^>]*>\s*<path d="M10\.29 3\.86/', $dashboard) === 1
+);
+// A triangle with an exclamation point, not a word: the label is gone from
+// the button's own text content, so nothing between the tags but the glyph.
+// The match has to start at the <button, not at id="pmReport" — strip_tags
+// only removes a tag it can see the opening angle bracket of, so a match
+// that begins mid-tag leaves the attributes behind as "text".
+check(
+    'the report button shows the warning triangle, with no word on it',
+    preg_match('#<button[^>]*\bid="pmReport".*?</button>#s', $dashboard, $pmReportTag) === 1
+        && trim(strip_tags($pmReportTag[0])) === ''
+        && strpos($pmReportTag[0], '<line') !== false,
+    'the button still carries text: ' . trim(strip_tags($pmReportTag[0] ?? ''))
+);
+check(
+    'the report button is wired to open the report modal, and never for your own listing',
+    strpos($dashboard, "pmReportBtn.addEventListener('click'") !== false
+        && strpos($dashboard, 'openModal(reportModal)') !== false
+        && strpos($dashboard, "document.getElementById('pmReport').hidden = isOwn") !== false
+        && strpos($dashboard, 'reportModal.hidden   = true;') !== false
+);
+check(
+    '"Something else" asks for a description before it can be sent',
+    strpos($dashboard, 'rmOtherHint.hidden = rmReason.value !==') !== false
+);
+check(
+    'style.css styles the report button and modal',
+    strpos($cssSrc, '.btn-report {') !== false
+        && strpos($cssSrc, '.report-modal-card {') !== false
+);
+check(
+    'report_listing.php exists and refuses to run on a GET',
+    is_file($web . '/report_listing.php')
+        && strpos(
+            (string) file_get_contents($web . '/report_listing.php'),
+            "if (\$_SERVER['REQUEST_METHOD'] !== 'POST')"
+        ) !== false
 );
 
 // ============================================================

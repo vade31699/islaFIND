@@ -17,6 +17,15 @@
 --   reviews       (post-service ratings, gated by completed contracts)
 --   user_interactions (view/search/inquiry history for recommendations)
 --   login_attempts (server-side failed-login counters, for throttling)
+--   admins        (islaFIND superadmin accounts)
+--   profile_reports (listing reports from members, the moderation queue)
+--
+-- NOTE for an EXISTING database: re-running this dump will NOT add a
+-- column to a table that is already there (CREATE TABLE IF NOT EXISTS
+-- is a no-op). Columns added to `providers` after a database was built
+-- — profile_picture, profile_code, status, blocked_at, blocked_reason
+-- — are applied automatically by isla_ensure_schema() in include/db.php
+-- on the next request, so nothing has to be run by hand.
 -- ============================================================
 
 -- Create the database if it does not already exist.
@@ -127,8 +136,10 @@ CREATE TABLE IF NOT EXISTS user_devices (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS providers (
     id              INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    profile_code    VARCHAR(20)   NULL,
     user_id         INT UNSIGNED  NOT NULL,
     profile_type    VARCHAR(20)   NOT NULL DEFAULT 'business',
+    status          VARCHAR(20)   NOT NULL DEFAULT 'active',
     name            VARCHAR(120)  NULL,
     profile_picture VARCHAR(255)  NULL,
     profile_description TEXT      NULL,
@@ -143,10 +154,14 @@ CREATE TABLE IF NOT EXISTS providers (
     interaction_count INT UNSIGNED NOT NULL DEFAULT 0,
     average_rating  FLOAT         NOT NULL DEFAULT 0,
     review_count    INT UNSIGNED  NOT NULL DEFAULT 0,
+    blocked_at      TIMESTAMP     NULL DEFAULT NULL,
+    blocked_reason  VARCHAR(255)  NULL DEFAULT NULL,
     created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_providers_profile_code (profile_code),
     KEY idx_providers_user (user_id),
     KEY idx_providers_title (selected_title),
+    KEY idx_providers_status (status),
     CONSTRAINT fk_providers_user FOREIGN KEY (user_id)
         REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE = InnoDB;
@@ -180,6 +195,107 @@ CREATE TABLE IF NOT EXISTS provider_album_images (
     KEY idx_album_provider (provider_id, sort_order, id),
     CONSTRAINT fk_album_provider FOREIGN KEY (provider_id)
         REFERENCES providers (id) ON DELETE CASCADE
+) ENGINE = InnoDB;
+
+-- ============================================================
+-- admins table (islaFIND superadmin accounts)
+-- These accounts are NOT part of the members table on purpose. A
+-- superadmin can read and moderate the report queue, change its own
+-- credentials and see listings the rest of the app cannot, so it
+-- must not share a row space — or a login path — with the people it
+-- moderates. Keep it that way: nothing in the members flow reads
+-- this table, and nothing in the admin flow writes to `users`.
+--
+-- id         : primary key
+-- email      : the ONLY way in (no phone, no user_id): unique
+-- password_hash : bcrypt hash from password_hash(), never a
+--               plaintext or reversible value
+-- full_name  : shown in the admin header, may be NULL
+-- mfa_enabled: 1 = a one-time code is emailed on every login.
+--              Defaults to 1, so an account is protected the moment
+--              it exists; the admin can turn it off in Settings.
+-- is_active  : 0 refuses the login without deleting the audit trail
+-- last_login_at / last_login_ip : stamped on a successful login
+-- ============================================================
+CREATE TABLE IF NOT EXISTS admins (
+    id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    email         VARCHAR(190) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name     VARCHAR(120) NULL,
+    mfa_enabled   TINYINT(1)   NOT NULL DEFAULT 1,
+    is_active     TINYINT(1)   NOT NULL DEFAULT 1,
+    last_login_at TIMESTAMP    NULL DEFAULT NULL,
+    last_login_ip VARCHAR(45)  NULL,
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                  ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_admins_email (email)
+) ENGINE = InnoDB;
+
+-- ============================================================
+-- profile_reports table (a member reporting a listing)
+-- Written by report_listing.php, read and actioned only in the
+-- superadmin dashboard.
+--
+-- id              : primary key
+-- provider_id     : the listing reported (providers.id). The
+--                   feature plan called this "isla_profile_id",
+--                   but every other table that points at a listing
+--                   calls it provider_id, so this does too.
+-- reporter_id     : the member who filed the report (users.id)
+-- reason_code     : a key of isla_report_reasons() — see
+--                   include/reporting.php for the whitelist
+-- details         : the member's free text, optional
+-- evidence_image  : one optional screenshot, validated by
+--                   isla_upload_validate() and stored as a bare
+--                   filename in public/uploads
+-- status          : 'pending' (in the queue), 'resolved' (the
+--                   listing was blocked, or was found to be fine
+--                   and cleared) or 'dismissed' (the report was
+--                   not upheld)
+-- admin_notes     : what the admin decided and why — the record
+--                   that outlives the queue itself
+-- listing_blocked : 1 when resolving this report blocked the
+--                   listing, so the queue can show at a glance
+--                   that moderation happened, not just a decision
+-- resolved_by     : admins.id of the admin who closed it
+--                   (NULL if that account is later deleted)
+-- created_at      : when the report was filed — the queue is
+--                   ordered by this, newest first
+--
+-- There is deliberately NO unique key on (provider_id, reporter_id):
+-- "one open report per member per listing" is enforced in code,
+-- because it is about OPEN reports. A member whose report was
+-- dismissed has to be able to report the same listing again.
+--
+-- Both foreign keys CASCADE, so the queue can never show a report
+-- about a listing or from a member that no longer exists.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS profile_reports (
+    id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    provider_id     INT UNSIGNED NOT NULL,
+    reporter_id     INT UNSIGNED NOT NULL,
+    reason_code     VARCHAR(40)  NOT NULL,
+    details         TEXT         NULL,
+    evidence_image  VARCHAR(255) NULL,
+    status          ENUM('pending', 'resolved', 'dismissed')
+                        NOT NULL DEFAULT 'pending',
+    admin_notes     TEXT         NULL,
+    listing_blocked TINYINT(1)   NOT NULL DEFAULT 0,
+    resolved_by     INT UNSIGNED NULL,
+    resolved_at     TIMESTAMP    NULL DEFAULT NULL,
+    created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_reports_queue (status, created_at),
+    KEY idx_reports_listing (provider_id, status),
+    KEY idx_reports_reporter (reporter_id, id),
+    CONSTRAINT fk_reports_listing FOREIGN KEY (provider_id)
+        REFERENCES providers (id) ON DELETE CASCADE,
+    CONSTRAINT fk_reports_reporter FOREIGN KEY (reporter_id)
+        REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_reports_admin FOREIGN KEY (resolved_by)
+        REFERENCES admins (id) ON DELETE SET NULL
 ) ENGINE = InnoDB;
 
 -- ============================================================

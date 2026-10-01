@@ -28,6 +28,7 @@ if (!isset($_SESSION['user_id'])) {
 // --- 3. Database connection + shared category lists ------------
 require_once __DIR__ . '/../include/db.php';
 require_once __DIR__ . '/../include/categories.php';
+require_once __DIR__ . '/../include/reporting.php';   // isla_profile_code()
 
 // --- 4. Load the current user ----------------------------------
 $stmt = $pdo->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');
@@ -252,6 +253,20 @@ if ($provider) {
         ':lng'      => $longitude,
         ':maps'     => $mapsUrl,
     ]);
+
+    // The listing now has an id, so it can be given its public
+    // IslaProfile ID. This is a second statement on purpose: the
+    // column is derived from the auto-increment key, and PDO cannot
+    // know that key until the INSERT has run. Doing it here (rather
+    // than generating a code up front) is what guarantees the code is
+    // the listing's real id, with no sequence to collide.
+    $newListingId = (int) $pdo->lastInsertId();
+    $codeStmt = $pdo->prepare('UPDATE providers SET profile_code = :code WHERE id = :id');
+    $codeStmt->execute([
+        ':code' => isla_profile_code($newListingId),
+        ':id'   => $newListingId,
+    ]);
+
     $msg = 'Your islaFIND profile was created!';
 }
 

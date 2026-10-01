@@ -23,6 +23,9 @@
 // lockout is ever kept in $_SESSION, which is what the removed
 // session-based lockout got wrong (see the note in login.php).
 //
+// Shared password rule (login.php's sign-up form states the same one):
+//   - isla_password_problem()  -> why a password is refused, or null
+//
 // Host-dependent extras (both OFF by default, so WAMP is unaffected):
 //   - isla_send_security_headers() -> SEND_SECURITY_HEADERS=1
 //   - the database session handler -> SESSION_DRIVER=mysql
@@ -341,6 +344,48 @@ const LOGIN_BACKOFF_STEP     = 5;     // seconds of wait on the first failure pa
 const LOGIN_BACKOFF_MAX      = 900;   // ceiling for the wait (15 min): never a hard lock
 const LOGIN_ATTEMPT_WINDOW   = 3600;  // seconds of quiet that forget a streak (1 hour)
 const LOGIN_ATTEMPT_TTL_DAYS = 30;    // rows untouched for this long are pruned
+
+/**
+ * isla_password_problem(string $password): ?string
+ * The app's password rule, in one place: at least 8 characters with an
+ * uppercase letter, a lowercase letter and one special character from
+ * ! @ -. Returns the sentence to show the person, or NULL when the
+ * password is acceptable.
+ *
+ * WHY IT EXISTS: the superadmin surfaces (tools/create_admin.php and the
+ * admin settings page) have to enforce exactly the rule the member
+ * registration form enforces, or an admin could end up with a password
+ * the app's own sign-up would have rejected. Rather than copy the four
+ * regexes into each new screen, they live here and every caller gets the
+ * same wording. login.php still states the rule in its own words for the
+ * registration and change-password forms — those messages are part of a
+ * form that predates this helper.
+ *
+ * Note the return convention: a string means "refused, here is why".
+ * NULL is the only value that means the password passed.
+ *
+ * @param string $password Candidate password.
+ * @return string|null Problem description, or NULL when acceptable.
+ */
+function isla_password_problem(string $password): ?string
+{
+    if (strlen($password) < 8) {
+        return 'Password must be at least 8 characters long.';
+    }
+    if (strlen($password) > 64) {
+        return 'Password must be 64 characters or fewer.';
+    }
+    if (!preg_match('/[A-Z]/', $password)) {
+        return 'Password must contain at least one uppercase letter.';
+    }
+    if (!preg_match('/[a-z]/', $password)) {
+        return 'Password must contain at least one lowercase letter.';
+    }
+    if (!preg_match('/[!@\-]/', $password)) {
+        return 'Password must contain at least one special character (! @ -).';
+    }
+    return null;
+}
 
 /**
  * login_backoff_seconds()

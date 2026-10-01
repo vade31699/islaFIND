@@ -117,12 +117,20 @@ if ($action === 'hire') {
             $stmt = $pdo->prepare(
                 "SELECT id FROM providers
                  WHERE user_id = :uid AND profile_type = 'individual'
+                   AND status = 'active'
                  ORDER BY id DESC LIMIT 1"
             );
             $stmt->execute([':uid' => $providerId]);
             $listingId = (int) $stmt->fetchColumn();
         }
 
+        // NEW work is refused on a blocked listing. The contract is
+        // pinned to a listing, so pinning it to a blocked one would let
+        // someone keep booking a provider the island has taken down.
+        // (RATING an old job stays allowed - see dashboard.php.)
+        if ($listingId === 0) {
+            chatFlash('error', 'That listing is not available for hiring right now.');
+        } else {
         // Record the hire request pinned to that specific listing.
         $stmt = $pdo->prepare(
             'INSERT INTO service_contracts (provider_id, provider_listing_id, client_id, status)
@@ -163,9 +171,10 @@ if ($action === 'hire') {
         chatFlash('success', 'Hire request sent to ' . $provider['full_name'] . '!');
         header('Location: ' . sid_append('messenger.php?chat=' . $providerId));
         exit;
-        }
-    }
-}
+        }   // end: listing is hireable
+    }       // end: chat already accepted
+}           // end: provider is hirable
+}           // end: action === 'hire'
 
 // ============================================================
 // 8. ACTION: accept / decline (worker decision)

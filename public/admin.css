@@ -1,0 +1,1000 @@
+/* ============================================================
+   admin.css — the superadmin panel
+
+   Loaded IN ADDITION TO style.css, never instead of it: the panel
+   reuses the app's own tokens, buttons, form controls and alerts so
+   a superadmin is looking at the same design system as everybody
+   else. Everything below is admin-only and namespaced .adm-* so
+   nothing here can leak into the member app.
+
+   Why a separate file rather than more rules in style.css: this
+   panel is reachable by a handful of people and is never part of a
+   member's page, so its styles should not be downloaded by every
+   feed card the app renders. The shared half (tokens, buttons,
+   fields) is already cached from style.css, so the extra request
+   here is small and keeps the member bundle untouched.
+
+   WHAT THE REDESIGN CHANGED
+   -------------------------
+   The structure was sound — sidebar, stat cards, panels, a table —
+   so this is a surface pass, not a rewrite, and every class name
+   the markup already uses is still here. What moved:
+
+     - Cooler, more separated neutrals, off the brand tokens, so a
+       seven-column table stays legible; a real elevation scale
+       instead of flat 1px borders on every box.
+     - A DARK sidebar. The panel is a tool for one job, and the
+       old white-on-white sidebar could not be told apart from the
+       page it was floating over.
+     - Panel-scoped controls (block 0b). style.css's buttons are
+       built for a thumb on a phone, and one of them was actively
+       broken here: .btn-outline carries a 14px top margin meant to
+       hold a button off the field above it, which in a table left
+       every outline button hanging 14px below its own row.
+     - Stat cards got icons and a hover lift; the queue got a
+       status column, a row count, an urgency accent, and rows that
+       are clickable end to end.
+
+   Every one of those is a presentation decision made here, in one
+   file, on top of markup that did not have to move.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   0. Panel-scoped design tokens
+   ------------------------------------------------------------
+   Everything visual hangs off these so the whole panel can be
+   re-skinned from one block. Neutrals are cooler and more
+   separated than the member app's, which keeps a dense table
+   legible; the teal is inherited so the panel still feels like
+   islaFIND rather than a bolt-on admin tool. */
+.adm {
+    --adm-side-w: 248px;
+    --adm-ink:      #0f1b2a;
+    --adm-ink-2:    #33465c;
+    --adm-muted:    #64748b;
+    --adm-line:     #e2e8f0;
+    --adm-line-soft:#eef2f7;
+    --adm-canvas:   #f1f5f9;
+    --adm-radius:   14px;
+    --adm-shadow:   0 1px 2px rgba(15, 27, 42, .04), 0 8px 24px -12px rgba(15, 27, 42, .14);
+    --adm-shadow-lg:0 2px 4px rgba(15, 27, 42, .04), 0 20px 44px -20px rgba(15, 27, 42, .28);
+    display: flex;
+    min-height: 100vh;
+    background: var(--adm-canvas);
+    color: var(--adm-ink);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* --- 1a. Sidebar ------------------------------------------- */
+.adm-side {
+    width: var(--adm-side-w);
+    flex: 0 0 var(--adm-side-w);
+    background: #0f1b2a;
+    color: #cbd5e1;
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+}
+
+.adm-brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 20px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, .07);
+}
+
+.adm-brand-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--primary), #0ea5a4);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -.02em;
+    flex: 0 0 auto;
+    box-shadow: 0 4px 12px -4px var(--primary-glow);
+}
+
+.adm-brand-text strong {
+    display: block;
+    font-size: 15px;
+    line-height: 1.2;
+    color: #f8fafc;
+    letter-spacing: -.01em;
+}
+
+.adm-brand-text span {
+    display: block;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: #7f93a8;
+    margin-top: 3px;
+    font-weight: 600;
+}
+
+.adm-nav {
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1 1 auto;
+    overflow-y: auto;
+}
+
+.adm-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #a9bacd;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    transition: background .15s ease, color .15s ease;
+}
+
+.adm-nav-link:hover {
+    background: rgba(255, 255, 255, .06);
+    color: #f1f5f9;
+}
+
+.adm-nav-link.is-active {
+    background: rgba(0, 119, 182, .18);
+    border-color: rgba(56, 189, 248, .22);
+    color: #fff;
+}
+
+.adm-nav-link svg {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    opacity: .9;
+}
+
+/* The unread count rides on the Reports link, so a pending queue is
+   visible from any admin page without opening it. */
+.adm-nav-count {
+    margin-left: auto;
+    min-width: 21px;
+    height: 21px;
+    padding: 0 6px;
+    border-radius: 11px;
+    background: var(--coral);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+}
+
+.adm-side-foot {
+    padding: 14px;
+    border-top: 1px solid rgba(255, 255, 255, .07);
+}
+
+.adm-who {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.adm-who-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(56, 189, 248, .16);
+    color: #7dd3fc;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 12px;
+    flex: 0 0 auto;
+}
+
+.adm-who-text {
+    min-width: 0;
+}
+
+.adm-who-text strong {
+    display: block;
+    font-size: 13px;
+    color: #f1f5f9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.adm-who-text span {
+    display: block;
+    font-size: 11px;
+    color: #7f93a8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- 1b. Main column --------------------------------------- */
+.adm-main {
+    flex: 1 1 auto;
+    min-width: 0;          /* lets tables scroll instead of stretching */
+    display: flex;
+    flex-direction: column;
+}
+
+.adm-top {
+    background: rgba(255, 255, 255, .88);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--adm-line);
+    padding: 18px 30px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
+.adm-top h1 {
+    margin: 0;
+    font-size: 21px;
+    line-height: 1.25;
+    letter-spacing: -.015em;
+    color: var(--adm-ink);
+}
+
+.adm-top p {
+    margin: 4px 0 0;
+    font-size: 13.5px;
+    color: var(--adm-muted);
+}
+
+.adm-top-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.adm-body {
+    padding: 28px 30px 64px;
+    max-width: 1280px;
+    width: 100%;
+}
+
+/* ------------------------------------------------------------
+   0b. Controls, restyled for a desktop panel
+   ------------------------------------------------------------
+   style.css's buttons and fields are sized for a member's thumb on
+   a phone: 48px tall, full width, and a 14px top margin on EVERY
+   outline button — that margin exists to hold a button away from
+   the field above it in a stacked mobile form. None of that is
+   right in a dense table, and the margin in particular was leaving
+   the queue's outline buttons hanging 14px below their own row.
+
+   Everything below is scoped under .adm, so the member app keeps
+   its touch-sized controls and the panel gets compact ones. */
+.adm .btn {
+    min-height: 0;
+    margin: 0;
+    padding: 8px 14px;
+    font-size: 13.5px;
+    font-weight: 600;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(15, 27, 42, .06);
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.adm .btn-block {
+    width: 100%;
+}
+
+.adm .btn-small {
+    padding: 7px 12px;
+    font-size: 13px;
+}
+
+/* Neutral by default: a table full of teal buttons reads as a wall of
+   calls to action, and the ONE row that genuinely needs a decision
+   already stands out because it is the only solid one. */
+.adm .btn-outline {
+    margin-top: 0;
+    background: #fff;
+    color: var(--adm-ink-2);
+    border: 1px solid var(--adm-line);
+}
+
+.adm .btn-outline:hover {
+    background: #f1f5f9;
+    color: var(--adm-ink);
+    border-color: #cbd5e1;
+}
+
+.adm .btn-danger {
+    margin-top: 0;
+    background: #fff;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+
+.adm .btn-danger:hover {
+    background: #b91c1c;
+    color: #fff;
+    border-color: #b91c1c;
+}
+
+/* Fields follow the buttons: a phone-height input inside a two-column
+   desktop panel looks like a form that failed to load. */
+.adm .field-label {
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.adm .field-in {
+    min-height: 0;
+    padding: 9px 12px;
+    font-size: 13.5px;
+    border-radius: 8px;
+    border-color: var(--adm-line);
+}
+
+.adm .field-in:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+/* The flash message from the last action. Given a real border and a
+   leading icon so it reads as a system message rather than a stray
+   line of coloured text. */
+.adm .alert {
+    border-radius: 10px;
+    font-size: 13.5px;
+    border-width: 1px;
+}
+
+/* ------------------------------------------------------------
+   1. Stat cards
+   ------------------------------------------------------------ */
+.adm-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+    gap: 16px;
+    margin-bottom: 26px;
+}
+
+.adm-stat {
+    background: var(--surface);
+    border: 1px solid var(--adm-line);
+    border-radius: var(--adm-radius);
+    padding: 18px 20px;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    box-shadow: var(--adm-shadow);
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+
+.adm-stat:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--adm-shadow-lg);
+    border-color: #cbd5e1;
+}
+
+.adm-stat-label {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--adm-muted);
+    font-weight: 700;
+}
+
+.adm-stat-value {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-top: 8px;
+    color: var(--adm-ink);
+    letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.adm-stat-hint {
+    font-size: 12.5px;
+    color: var(--adm-muted);
+    margin-top: 6px;
+}
+
+.adm-stat.is-alert {
+    border-color: rgba(232, 85, 77, .45);
+    background: linear-gradient(180deg, #fff7f6, #fff);
+}
+
+.adm-stat.is-alert .adm-stat-value {
+    color: var(--coral-dark);
+}
+
+/* Label and icon share a row so the number below has a clean left edge
+   and the eye has something to land on before it reads the figure. */
+.adm-stat-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.adm-stat-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    margin-left: auto;      /* pinned right; the label takes the rest */
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+}
+
+.adm-stat-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.adm-stat-icon.is-coral { background: #ffecec; color: var(--coral-dark); }
+.adm-stat-icon.is-green { background: #e7f7ed; color: #15803d; }
+.adm-stat-icon.is-slate { background: #eef2f7; color: #475569; }
+.adm-stat-icon.is-amber { background: #fff4e5; color: #b45309; }
+
+/* ------------------------------------------------------------
+   2. Panels (the white card the content sits in)
+   ------------------------------------------------------------ */
+.adm-panel {
+    background: var(--surface);
+    border: 1px solid var(--adm-line);
+    border-radius: var(--adm-radius);
+    margin-bottom: 20px;
+    overflow: hidden;
+    box-shadow: var(--adm-shadow);
+}
+
+.adm-panel-head {
+    padding: 17px 20px;
+    border-bottom: 1px solid var(--adm-line-soft);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.adm-panel-head h2 {
+    margin: 0;
+    font-size: 15.5px;
+    color: var(--adm-ink);
+    letter-spacing: -.01em;
+}
+
+.adm-panel-head p {
+    margin: 3px 0 0;
+    font-size: 12.5px;
+    color: var(--adm-muted);
+}
+
+.adm-panel-head-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* A panel head is a flex ROW so its actions can sit at the far end, which
+   means a title and its subtitle have to be told to stack. index.php wraps
+   them in a <div>; settings.php writes them as bare siblings, and without
+   this rule "Sign-in email" and "Where your verification codes go." render
+   on ONE line with the title vertically centred against the subtitle.
+   Forcing full-width basis on the bare children fixes that shape and stops
+   the next view from reintroducing it. */
+.adm-panel-head > h2,
+.adm-panel-head > p {
+    flex: 0 0 100%;
+    margin-left: 0;
+}
+
+.adm-panel-body {
+    padding: 20px;
+}
+
+.adm-panel-body.is-flush {
+    padding: 0;
+}
+
+/* ------------------------------------------------------------
+   3. Filter tabs
+   ------------------------------------------------------------ */
+.adm-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.adm-tab {
+    padding: 7px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--adm-line);
+    background: #fff;
+    color: var(--adm-ink-2);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.adm-tab:hover {
+    border-color: #94a3b8;
+    color: var(--adm-ink);
+}
+
+.adm-tab.is-active {
+    background: var(--adm-ink);
+    border-color: var(--adm-ink);
+    color: #fff;
+}
+
+.adm-tab .adm-tab-n {
+    opacity: .7;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------
+   4. The reports table
+   ------------------------------------------------------------ */
+.adm-table-wrap {
+    overflow-x: auto;
+}
+
+.adm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+}
+
+.adm-table th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--adm-muted);
+    font-weight: 700;
+    padding: 11px 16px;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--adm-line);
+    white-space: nowrap;
+}
+
+.adm-table td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--adm-line-soft);
+    vertical-align: top;
+    color: var(--adm-ink-2);
+}
+
+.adm-table tr:last-child td {
+    border-bottom: none;
+}
+
+.adm-table tbody tr {
+    transition: background .12s ease;
+}
+
+.adm-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+/* A row the admin has to act on today, called out by a warm accent down
+   the left edge rather than a fill: enough to separate it from the
+   closed rows underneath without making the table look like an error
+   log. Set server-side by created_at, not by JavaScript. */
+.adm-table tbody tr.is-urgent td:first-child {
+    box-shadow: inset 3px 0 0 #f59e0b;
+}
+
+.adm-table tbody tr.is-urgent:hover {
+    background: #fffbf5;
+}
+
+/* The whole row is the hit target. The "Review" link carries a
+   transparent ::after stretched over the row, which is what makes a
+   dense table usable without aiming at a 60px button — the real
+   anchor stays where it is for keyboard and screen readers. */
+.adm-table tbody tr.is-linked {
+    position: relative;
+}
+
+.adm-table tbody tr.is-linked .adm-rowlink::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+}
+
+.adm-table tbody tr.is-linked .adm-rowlink:focus-visible {
+    outline: none;
+}
+
+.adm-table tbody tr.is-linked .adm-rowlink:focus-visible::after {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
+
+.adm-cell-actions {
+    white-space: nowrap;
+    text-align: right;
+}
+
+.adm-ref {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--adm-muted);
+}
+
+/* Two lines: the listing title, then the reference + owner under it. */
+.adm-primary {
+    font-weight: 600;
+    color: var(--adm-ink);
+    display: block;
+}
+
+.adm-secondary {
+    display: block;
+    font-size: 12.5px;
+    color: var(--adm-muted);
+    margin-top: 3px;
+}
+
+/* .adm-secondary exists to sit under a primary line, so it carries a 3px
+   top margin. Used on its own — a panel-head note, a footer line — that
+   offset just reads as sloppy alignment against the box edge, and the
+   obvious fix is an inline style, which does not survive the next edit.
+   Opt out by name instead. */
+.adm-secondary.is-flat {
+    margin-top: 0;
+}
+
+.adm-empty {
+    padding: 52px 20px;
+    text-align: center;
+    color: var(--adm-muted);
+}
+
+.adm-empty strong {
+    display: block;
+    color: var(--adm-ink-2);
+    font-size: 15px;
+    margin-bottom: 5px;
+}
+
+/* ------------------------------------------------------------
+   5. Badges
+   ------------------------------------------------------------ */
+.adm-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .01em;
+    white-space: nowrap;
+}
+
+.adm-badge-pending  { background: #fff4e5; color: #b45309; }
+.adm-badge-resolved { background: #e7f7ed; color: #15803d; }
+.adm-badge-dismissed{ background: #eef2f7; color: #475569; }
+.adm-badge-blocked { background: #ffecec; color: var(--coral-dark); }
+.adm-badge-active  { background: var(--primary-soft); color: var(--primary-dark); }
+
+.adm-badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: 0 0 auto;
+}
+
+/* ------------------------------------------------------------
+   6. Report detail
+   ------------------------------------------------------------ */
+.adm-detail {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+}
+
+.adm-detail-col {
+    min-width: 0;
+}
+
+.adm-kv {
+    display: grid;
+    grid-template-columns: minmax(120px, 34%) 1fr;
+    gap: 9px 16px;
+    font-size: 13.5px;
+    margin: 0;
+}
+
+.adm-kv dt {
+    color: var(--adm-muted);
+    font-weight: 600;
+}
+
+.adm-kv dd {
+    margin: 0;
+    color: var(--adm-ink);
+    overflow-wrap: anywhere;
+}
+
+.adm-quote {
+    background: #f8fafc;
+    border-left: 3px solid var(--primary);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 14px;
+    font-size: 13.5px;
+    color: var(--adm-ink-2);
+    white-space: pre-wrap;     /* the member's line breaks survive */
+    overflow-wrap: anywhere;
+}
+
+.adm-evidence {
+    display: block;
+    margin-top: 14px;
+}
+
+.adm-evidence img {
+    max-width: 100%;
+    max-height: 340px;
+    border-radius: 10px;
+    border: 1px solid var(--adm-line);
+    display: block;
+    box-shadow: var(--adm-shadow);
+}
+
+.adm-evidence figcaption {
+    font-size: 12px;
+    color: var(--adm-muted);
+    margin-top: 7px;
+}
+
+/* The reported listing, as its owner would see it: this is the thing
+   the admin is judging, so it gets the real picture and the real text. */
+.adm-listing-head {
+    display: flex;
+    gap: 13px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.adm-listing-pic {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    object-fit: cover;
+    background: #eef2f7;
+    flex: 0 0 auto;
+}
+
+.adm-listing-pic.is-empty {
+    display: grid;
+    place-items: center;
+    color: #94a3b8;
+}
+
+.adm-listing-title {
+    display: block;
+}
+
+/* The .adm-empty treatment centred and tall, reused inline when a
+   deleted listing leaves a one-line note instead of a whole panel. */
+.adm-empty.is-inline {
+    padding: 22px 0;
+    text-align: left;
+}
+
+.adm-actions-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.adm-note-box {
+    margin-top: 4px;
+}
+
+/* ------------------------------------------------------------
+   6b. Detail-page text blocks
+   ------------------------------------------------------------
+   These four replace inline style="" on the report page. They exist
+   as classes because the same four spacings recur on every detail
+   view, and a stylesheet is the only place that can keep them
+   consistent. */
+.adm-subhead {
+    margin: 0 0 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--adm-muted);
+}
+
+.adm-subhead.is-spaced {
+    margin: 22px 0 9px;
+}
+
+.adm-tight { margin: 0 0 9px; }
+.adm-stack { margin: 0 0 5px; }
+.adm-spaced { margin-top: 15px; }
+
+.adm-form-block {
+    margin-top: 24px;
+    padding-top: 22px;
+    border-top: 1px solid var(--adm-line-soft);
+}
+
+.adm-actions-row.is-spaced {
+    margin-top: 13px;
+}
+
+/* ------------------------------------------------------------
+   7. Settings rows
+   ------------------------------------------------------------ */
+.adm-form-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 30%) 1fr;
+    gap: 24px;
+    padding: 20px;
+    border-bottom: 1px solid var(--adm-line-soft);
+}
+
+.adm-form-row:last-child {
+    border-bottom: none;
+}
+
+.adm-form-row h3 {
+    margin: 0;
+    font-size: 14.5px;
+    color: var(--adm-ink);
+}
+
+.adm-form-row p {
+    margin: 5px 0 0;
+    font-size: 12.5px;
+    color: var(--adm-muted);
+}
+
+/* ------------------------------------------------------------
+   8. Narrow screens
+   ------------------------------------------------------------ */
+@media (max-width: 1024px) {
+    /* The queue is seven columns wide. Rather than let the table
+       scroll sideways on a tablet, drop the two least load-bearing
+       columns: "Reported by" and "Listing state" are both visible
+       again on the report page, and the reason + age still identify
+       the row. */
+    .adm-table th:nth-child(4),
+    .adm-table td:nth-child(4),
+    .adm-table th:nth-child(5),
+    .adm-table td:nth-child(5) {
+        display: none;
+    }
+}
+
+@media (max-width: 860px) {
+    .adm {
+        display: block;
+    }
+
+    .adm-side {
+        width: auto;
+        flex: none;
+        height: auto;
+        position: static;
+        border-bottom: 1px solid rgba(255, 255, 255, .08);
+    }
+
+    .adm-brand {
+        border-bottom-color: rgba(255, 255, 255, .07);
+    }
+
+    .adm-nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+        padding: 10px 12px;
+    }
+
+    .adm-nav-count {
+        margin-left: 0;
+    }
+
+    .adm-side-foot {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-top-color: rgba(255, 255, 255, .07);
+    }
+
+    .adm-who {
+        margin-bottom: 0;
+        flex: 1 1 auto;
+    }
+
+    .adm-top {
+        position: static;
+        padding: 16px 18px;
+        backdrop-filter: none;
+    }
+
+    .adm-body {
+        padding: 18px 18px 52px;
+    }
+
+    .adm-detail,
+    .adm-form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .adm-stat-value {
+        font-size: 26px;
+    }
+}
+/* ---------- Settings: codes and commands ----------
+   Two things the other views have no equivalent for: a 6-digit
+   verification box, and the shell command an operator runs to create
+   or reset an admin account. */
+
+.adm-code {
+    /* Wide enough that the six digits do not feel cramped, and set in
+       a monospaced face so a mistyped digit is visible at a glance. */
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 22px;
+    letter-spacing: 6px;
+    text-align: center;
+    text-indent: 6px;   /* balances the letter-spacing so it stays centred */
+    padding: 12px 14px;
+}
+
+.adm-code-block {
+    margin: 10px 0;
+    padding: 12px 14px;
+    background: #0f2233;
+    color: #d7f0e0;
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+/* The panels in Settings are stacked, so give each one room to breathe
+   instead of letting them sit flush against one another. */
+.adm-body .adm-panel + .adm-panel {
+    margin-top: 16px;
+}
+
+/* Inside a panel the shared .field block is used for form rows; left
+   alone it would stretch a label across the full panel width. */
+.adm-panel-body .field {
+    max-width: 460px;
+}
+
+.adm-panel-body .adm-actions-row {
+    margin-top: 14px;
+}

@@ -31,7 +31,7 @@ if ($providerId <= 0) {
 require_once __DIR__ . '/../include/db.php';
 
 // --- 5. Load the provider (category is needed for affinity) ------
-$stmt = $pdo->prepare('SELECT id, selected_title FROM providers WHERE id = :id LIMIT 1');
+$stmt = $pdo->prepare('SELECT id, selected_title FROM providers WHERE id = :id AND status = \'active\' LIMIT 1');
 $stmt->execute([':id' => $providerId]);
 $provider = $stmt->fetch();
 

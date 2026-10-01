@@ -30,6 +30,24 @@
     box-sizing: border-box; /* Width/height include padding & border */
 }
 
+/* The hidden attribute always wins.
+   JS drives most of this UI by toggling element.hidden, but the
+   browser's own `[hidden] { display: none }` rule is the weakest
+   thing in the cascade: ANY class rule that sets `display` beats
+   it, so a "hidden" chip stays on screen the moment it has a
+   class. That is not hypothetical — this stylesheet had grown
+   fifteen one-off `[hidden]` patches to fight it, and the newest
+   casualty was the "On the Job" chip: `display: inline-block` on
+   .pm-onjob overrode the attribute, so it showed on EVERY listing
+   (business included) instead of only on a hired individual.
+   !important is the right tool here precisely because the whole
+   point is to outrank the class rules that broke it. The old
+   per-component patches are left in place: they now agree with
+   this rule instead of contradicting it. */
+[hidden] {
+    display: none !important;
+}
+
 body {
     background-color: var(--bg); /* Clean Off-White page background */
     margin: 0;                   /* Remove default 8px browser margin */
@@ -656,6 +674,17 @@ body {
     background-color: var(--primary-dark);
 }
 
+/* Icons inside buttons need an explicit size. An inline <svg> that
+   carries only a viewBox has NO intrinsic size, so the browser falls
+   back to its 300x150 default and the icon tears the button apart.
+   16px is the app's standard button icon; variants that need a
+   different one (.btn-pin, .btn-map) set their own below. */
+.btn svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
 /* Outlined variant (used for the Logout button on the dashboard) */
 .btn-outline {
     background-color: var(--surface);
@@ -803,7 +832,10 @@ body {
     margin: 0 0 14px 0;
 }
 
-/* Clickable avatar shows a dark "Change photo" overlay on hover */
+/* Clickable avatar shows a dark scrim on hover. It carries ONLY the
+   word "Change photo" — no glyph. The picture badge on the corner is
+   the icon for this action, and a second icon inside the scrim read as
+   a sticker slapped over the user's own face. */
 .dash-avatar-btn {
     cursor: pointer;
 }
@@ -812,23 +844,20 @@ body {
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    background-color: rgba(0, 0, 0, 0.45);
+    background-color: rgba(0, 26, 38, 0.55);
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
+    padding: 0 14px;
     color: var(--surface);
-    font-size: 11px;
-    font-weight: bold;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    line-height: 1.25;
+    text-align: center;
     opacity: 0;               /* hidden until hover/focus */
     transition: opacity 0.2s;
     pointer-events: none;     /* clicks pass through to the avatar */
-}
-
-.avatar-hover svg {
-    width: 22px;
-    height: 22px;
 }
 
 .dash-avatar-btn:hover .avatar-hover,
@@ -836,26 +865,42 @@ body {
     opacity: 1;               /* reveal "Change photo" on hover */
 }
 
-/* Always-visible camera badge on the avatar's bottom-right corner */
+/* Always-visible picture badge on the avatar's bottom-right corner.
+   A quiet white disc with the teal picture glyph: it has to stay
+   visible (it is the only hint that a picture can be changed) but it
+   must not compete with the photo, so it is neutral white with a
+   hairline shadow instead of a saturated teal dot. It seats on the
+   avatar's ring and lifts when the avatar is hovered or focused. */
 .avatar-badge {
     position: absolute;
-    right: -2px;
-    bottom: -2px;
+    right: -4px;
+    bottom: -4px;
     width: 30px;
     height: 30px;
     border-radius: 50%;
-    background-color: var(--primary);
-    border: 3px solid var(--surface);
+    background-color: var(--surface);
+    border: 2px solid var(--surface);
+    box-shadow: 0 2px 6px rgba(0, 40, 60, 0.28);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--surface);
+    color: var(--primary);
+    transition: transform 0.18s ease, background-color 0.18s ease,
+                color 0.18s ease, box-shadow 0.18s ease;
     pointer-events: none;     /* the avatar button gets the clicks */
 }
 
 .avatar-badge svg {
-    width: 14px;
-    height: 14px;
+    width: 15px;
+    height: 15px;
+}
+
+.dash-avatar-btn:hover .avatar-badge,
+.dash-avatar-btn:focus-visible .avatar-badge {
+    transform: scale(1.08);
+    background-color: var(--primary);
+    color: var(--surface);
+    box-shadow: 0 4px 10px var(--primary-glow);
 }
 
 /* Popup action menu (Show / Upload), anchored below the avatar */
@@ -914,6 +959,21 @@ body {
     flex-shrink: 0;
 }
 
+/* ============================================================
+   Full-screen overlays — stacking scale
+   Every overlay here is a position:fixed sibling of <body>, so
+   EQUAL z-index values are settled by DOM order, not by meaning.
+   That bit once: the lightbox is printed before the modals, so at
+   the same z-index the listing-detail modal painted straight over
+   it and tapping a gallery photo inside that modal appeared to do
+   nothing. The layers are therefore kept apart on purpose:
+     40    app header, bottom nav
+     50-70 dropdowns, action bars
+     100   modals (inquiry, listing detail, reviews)
+     120   lightbox — opens FROM INSIDE a modal, so it must clear
+           100 or it hides behind the very card it was opened from
+   ============================================================ */
+
 /* Full-size lightbox viewer (dark backdrop + centered image) */
 .lightbox {
     position: fixed;
@@ -922,7 +982,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;             /* above the header and bottom nav */
+    z-index: 120;            /* above the modals — see the scale above */
     animation: lightbox-in 0.2s ease;
 }
 
@@ -2469,6 +2529,26 @@ body {
     text-align: left;
 }
 
+/* "Use a different address" under the change-email code box. It is a
+   secondary escape hatch next to a primary "Confirm" button, so it needs
+   to read as quieter than a normal button in the row — full width would
+   make it look like a third way to finish the form.
+
+   The margin is set on the FORM and cancelled on the button on purpose:
+   .btn-outline carries a 14px top margin of its own (it exists to hold a
+   button off the field above it in a stacked form). Left alone, that
+   margin collapses with this one and the gap becomes a coincidence of
+   two numbers rather than something anyone can reason about. */
+.sec-cancel {
+    margin-top: 14px;
+}
+
+.sec-cancel .btn {
+    margin-top: 0;
+    font-weight: 400;
+    font-size: 13px;
+}
+
 /* Device list inside the Privacy & Security panel */
 .device-list {
     list-style: none;
@@ -2895,41 +2975,12 @@ body {
     display: none !important;
 }
 
-/* Wrapper pairing the modal's map button with its hint, so the two
-   stack as one unit inside the .pm-actions column. */
+/* Wrapper for the modal's map button, so it sits as one full-width
+   block in the .pm-actions column. */
 .pm-route {
     display: flex;
     flex-direction: column;
     width: 100%;
-}
-
-/* Small "Starts from your location" caption under every Get
-   Directions button. It tells the visitor why the browser may ask
-   for a location before that prompt appears, so it is deliberately
-   quiet: muted text, a tiny crosshair icon, and left-aligned next to
-   the icon rather than centred like a button label. */
-.route-hint {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 6px;
-    margin: 6px 2px 0;
-    color: #6b7b85;
-    font-size: 11.5px;
-    font-weight: 600;
-    line-height: 1.3;
-}
-
-.route-hint svg {
-    width: 13px;
-    height: 13px;
-    flex-shrink: 0;
-    opacity: 0.85;
-}
-
-/* The modal shows/hides the hint from JS; flex must lose to [hidden]. */
-.route-hint[hidden] {
-    display: none !important;
 }
 
 /* Account-sync notice on the streamlined profile form */
@@ -3714,14 +3765,23 @@ body {
     background: var(--primary-dark);
 }
 
-/* Inquiry modal: centered card over a dark backdrop */
+/* Modal: a card centered over a dark backdrop. The card is allowed
+   to be TALLER than the screen — the listing detail modal carries a
+   photo, a gallery strip, details and two action buttons, which is
+   more than a phone viewport has — so this is the scroll container
+   and the card is centered with auto margins instead of
+   align-items: center. Flex centering would push an over-tall card
+   off the TOP of the viewport, where it cannot be scrolled back to:
+   that clipped the listing's photo and album strip out of sight
+   (auto margins collapse to 0 on overflow, so nothing is lost). */
 .modal {
     position: fixed;
     inset: 0;
     z-index: 100;
     display: flex;
-    align-items: center;
     justify-content: center;
+    overflow-y: auto;         /* a tall card scrolls instead of clipping */
+    overscroll-behavior: contain;   /* scrolling the card never scrolls the page behind it */
     padding: 20px;
 }
 
@@ -3730,7 +3790,11 @@ body {
 }
 
 .modal-backdrop {
-    position: absolute;
+    /* Fixed, not absolute: the modal above is now a scroll container,
+       and an absolute backdrop would only cover its first viewport
+       worth — leaving the top of the page undimmed once the card was
+       scrolled past it. */
+    position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.55);
     animation: fadeIn 0.2s ease;
@@ -3740,6 +3804,7 @@ body {
     position: relative;
     width: 100%;
     max-width: 400px;
+    margin: auto;             /* centers the card; collapses to 0 on overflow */
     background: var(--surface);
     border-radius: 16px;
     padding: 22px 20px 20px 20px;
@@ -3808,23 +3873,60 @@ body {
     flex-shrink: 0;
 }
 
+/* The Report pill shares the name row with that heart, so it drops the
+   full-width .btn-report treatment below (which is sized for the stacked
+   .pm-actions column) and becomes a pill of the SAME geometry as .save-btn
+   — same height, same border, same radius — so the two controls read as
+   one pair rather than as a stray button that got promoted.
+
+   The pill is ICON ONLY (see the button's comment in dashboard.php for
+   why), so the horizontal padding is just enough to make it a rounded
+   square instead of a letterbox around a 15px glyph.
+
+   width:auto and min-height:0 both have to be stated: .btn sets
+   width:100% and a 48px touch target, which in a flex row would stretch
+   the pill across the whole modal and push the heart off screen. The
+   resulting target is ~35x31px rather than the 48px .btn asks for —
+   deliberately, because a 48px square next to a 29px-tall heart would
+   unbalance the row, and this is a control nobody taps by accident. */
+.pm-head .pm-name-row .btn-report {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 7px 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+
+.pm-head .pm-name-row .btn-report svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+}
+
+/* The report modal's "here is what you are reporting" line: the listing
+   name with its category badge beside it. A flex row with a gap, so the
+   badge never butts against a long business name — and the name is
+   allowed to wrap onto a second line rather than being clipped. */
+.rm-target {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 6px 0;
+    text-align: left;
+    color: #222222;
+}
+
+.rm-target .provider-badge {
+    flex-shrink: 0;
+}
+
 .pm-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
-}
-
-.pm-type {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    color: #8a9890;
-    background: #f0f5f2;
-    border: 1px solid #e0eae4;
-    padding: 3px 8px;
-    border-radius: 12px;
 }
 
 .pm-rating {
@@ -4077,6 +4179,62 @@ body {
     max-height: 85vh;
     display: flex;
     flex-direction: column;
+}
+
+/* ---------- Reporting a listing ----------
+   Two new pieces: the quiet "Report" button in the detail
+   modal, and the report form's own card.
+
+   The button is deliberately the plainest control in the modal. A
+   member who trusted a listing should never feel nudged away from it,
+   so it is outline grey with no colour of its own — a listing with a
+   problem should look the same as one without until you go looking
+   for the report. The sizes below suit a stacked action column; the
+   name row overrides them for its own pill (see
+   .pm-name-row .btn-report). */
+.btn-report {
+    background: transparent;
+    color: #7b8794;
+    border: 1px solid #dfe4e9;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    width: 100%;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.btn-report:hover {
+    background: #f4f6f8;
+    color: #52606d;
+    border-color: #cdd5dc;
+}
+
+.btn-report svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+}
+
+.report-modal-card {
+    max-width: 440px;
+    /* The form is taller than a phone screen once the reason, the note
+       and the file field are all shown, so the CARD scrolls while the
+       sticky header and footer stay put. Same treatment as the reviews
+       modal above. */
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.report-modal-card form {
+    text-align: left;
 }
 
 /* Star filter tabs: ALL / 5★ / 4★ / 3★ / 2★ / 1★ */
@@ -4679,38 +4837,64 @@ body {
     display: contents;
 }
 
-/* Deliberately a quiet ghost button: this is a routine edit offered
-   on every card, so it must not compete with the card's real actions
-   (Edit / Delete) or the picture it belongs to. */
+/* The "Add/Change picture" control under the listing's photo. Same
+   picture affordance as the account avatar's badge (see .avatar-badge),
+   sized as a proper button rather than the old 12px-camera-in-an-11px
+   pill: a real 32px touch target, a 14px glyph, and generous padding
+   so the label is legible instead of cramped. Deliberately a quiet
+   secondary control — it must not compete with the card's real actions
+   (Edit / Delete) or with the photo it belongs to. */
 .prov-photo-btn {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
-    border: 1px solid var(--primary-soft);
+    justify-content: center;
+    gap: 6px;
+    min-height: 32px;         /* comfortable tap target on a phone */
+    padding: 6px 12px;
+    border: 1px solid transparent;
     border-radius: 999px;
-    background: var(--surface);
-    color: var(--primary);
-    font-size: 11px;
+    background-color: var(--primary-soft);
+    color: var(--primary-dark);
+    font-size: 12px;
     font-weight: 700;
+    letter-spacing: 0.2px;
     line-height: 1;
+    white-space: nowrap;
     cursor: pointer;
+    transition: background-color 0.18s ease, color 0.18s ease,
+                transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .prov-photo-btn svg {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
 }
 
 .prov-photo-btn:hover {
-    background: var(--primary-soft);
+    background-color: var(--primary);
+    color: var(--surface);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px var(--primary-glow);
+}
+
+.prov-photo-btn:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+/* Keyboard users get the same clear ring the rest of the app uses */
+.prov-photo-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
 }
 
 /* The same busy treatment busy.js gives a submitting form; set by
    hand because the file inputs post through form.submit(), which
    never fires the submit event busy.js listens for. */
 .prov-photo-btn.is-loading {
-    opacity: 0.6;
+    opacity: 0.55;
+    pointer-events: none;     /* no second upload while one is running */
     cursor: wait;
 }
 
@@ -4753,6 +4937,44 @@ body {
 .photo-warning svg {
     width: 15px;
     height: 15px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+/* ---------- A listing an admin removed ----------
+   Deliberately louder than .photo-warning above. That one is a nudge
+   about a cosmetic gap; this one says the owner is currently getting no
+   customers at all, so it gets the full width of the card, a warning
+   icon and red ink. The owner is the only person who ever sees it. */
+.listing-blocked-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    margin: 0 0 12px 0;
+    padding: 12px 13px;
+    background: #fdf0f0;
+    border: 1px solid #f0c9c9;
+    border-left: 3px solid #d94b4b;
+    border-radius: 12px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: #9c2b2b;
+    text-align: left;
+}
+
+.listing-blocked-warning strong {
+    display: block;
+    color: #8a1f1f;
+}
+
+.listing-blocked-warning em {
+    font-style: normal;
+    font-weight: 600;
+}
+
+.listing-blocked-warning svg {
+    width: 17px;
+    height: 17px;
     flex-shrink: 0;
     margin-top: 1px;
 }
@@ -4867,6 +5089,14 @@ body {
 .prov-album-form {
     display: flex;
 }
+
+/* .btn-outline carries a 14px top margin for the full-width card
+   buttons; here the button sits in its own flex row right under the
+   album grid, so that margin would just push it off the grid. */
+.prov-album-form .btn {
+    margin-top: 0;
+}
+
 
 .prov-album-empty,
 .prov-album-full,

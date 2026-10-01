@@ -25,29 +25,88 @@ require_once __DIR__ . '/db_settings.php';
  * isla_ensure_schema(PDO $pdo)
  * Creates tables that a feature added AFTER the database was first
  * built: saved_listings (the bookmarked-listings heart),
- * login_attempts (the server-side failed-login counters) and
+ * login_attempts (the server-side failed-login counters),
  * provider_album_images (a business listing's photo album),
- * none of which existed in the original schema dump. It also adds
- * providers.profile_picture, the listing's own picture.
+ * admins (the superadmin accounts) and profile_reports (the listing
+ * report queue), none of which existed in the original schema dump.
+ * It also adds the providers columns those features need:
+ * profile_picture (the listing's own picture), profile_code (the
+ * public IslaProfile ID) and status / blocked_at / blocked_reason
+ * (moderation state).
  *
  * Why here instead of only in final_app.sql: an existing deployment
  * must not have to re-import the dump to use a new feature. Every
  * statement is CREATE TABLE IF NOT EXISTS, so it is a no-op once the
  * table exists, and the once-per-session guard below (or the plain
  * call from a CLI script) keeps even that no-op off the hot path of
- * every request.
+ * every request. Every ALTER is preceded by an information_schema
+ * probe, because none of them can be written idempotently.
  *
  * A failure here must NOT take the whole app down, so errors are
  * logged and swallowed — the only consequence is that the bookmarks
  * feature reports "unavailable" instead of crashing every page, that
  * login throttling reads an empty table (which the throttle helpers
- * treat as "no failures yet"), and that a listing's own picture
+ * treat as "no failures yet"), that a listing's own picture
  * column is missing, which leaves every card on the account avatar
- * it already used.
+ * it already used, and that the superadmin login cannot match any
+ * account (which fails CLOSED — see include/admin_auth.php).
  *
  * @param PDO $pdo Live connection created just above.
  * @return void
  */
+
+/**
+ * isla_schema_has_column(PDO $pdo, string $table, string $column): bool
+ * Does this table already have this column? The information_schema probe
+ * that makes an ALTER safe to re-run.
+ *
+ * WHY IT EXISTS: MySQL has no `ADD COLUMN IF NOT EXISTS` (MariaDB has it,
+ * TiDB does not), so a plain ALTER would throw "Duplicate column name" the
+ * second time it ran — and isla_ensure_schema() runs on every request until
+ * the once-per-session guard is set. Asking the server first is the only
+ * portable way to make the ALTER idempotent.
+ *
+ * @param PDO    $pdo    Connection to inspect.
+ * @param string $table  Table name.
+ * @param string $column Column name.
+ * @return bool TRUE when the column is already there.
+ */
+function isla_schema_has_column(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME   = :t
+            AND COLUMN_NAME  = :c
+          LIMIT 1'
+    );
+    $stmt->execute([':t' => $table, ':c' => $column]);
+    return (bool) $stmt->fetchColumn();
+}
+
+/**
+ * isla_schema_has_index(PDO $pdo, string $table, string $index): bool
+ * Same question for an index. Kept beside isla_schema_has_column() so the
+ * one rule of this file is obvious: every ALTER is preceded by a probe.
+ *
+ * @param PDO    $pdo    Connection to inspect.
+ * @param string $table  Table name.
+ * @param string $index  Index name.
+ * @return bool TRUE when the index is already there.
+ */
+function isla_schema_has_index(PDO $pdo, string $table, string $index): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT 1 FROM information_schema.STATISTICS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME   = :t
+            AND INDEX_NAME   = :i
+          LIMIT 1'
+    );
+    $stmt->execute([':t' => $table, ':i' => $index]);
+    return (bool) $stmt->fetchColumn();
+}
+
 function isla_ensure_schema(PDO $pdo): void
 {
     // Once per PHP session is plenty — and for a CLI script (no active
@@ -132,6 +191,138 @@ function isla_ensure_schema(PDO $pdo): void
 
         if (!$hasListingPic) {
             $pdo->exec('ALTER TABLE providers ADD COLUMN profile_picture VARCHAR(255) NULL AFTER name');
+        }
+
+        // ------------------------------------------------------------------
+        // admins — the islaFIND superadmin accounts
+        //
+        // Deliberately NOT created with a seeded account: there is no row
+        // here until someone runs `php tools/create_admin.php`, which asks
+        // for the password and hashes it (see that file). Shipping a fixed
+        // superadmin password in the repository would hand every deployment
+        // of this app the same working key.
+        //
+        // mfa_enabled defaults to 1 (a code is emailed on every login). The
+        // safest setting is the default one, so a half-finished setup is
+        // still a protected one.
+        // ------------------------------------------------------------------
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS admins (
+                id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                email         VARCHAR(190) NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                full_name     VARCHAR(120) NULL,
+                mfa_enabled   TINYINT(1)   NOT NULL DEFAULT 1,
+                is_active     TINYINT(1)   NOT NULL DEFAULT 1,
+                last_login_at TIMESTAMP    NULL DEFAULT NULL,
+                last_login_ip VARCHAR(45)  NULL,
+                created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                                  ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY uq_admins_email (email)
+            ) ENGINE = InnoDB'
+        );
+
+        // ------------------------------------------------------------------
+        // profile_reports — a member's report about a listing
+        //
+        // provider_id is providers.id: the plan for this feature called the
+        // column "isla_profile_id", but the listing table in this schema has
+        // always been `providers`, and every other table that points at a
+        // listing (saved_listings, provider_album_images, service_contracts)
+        // calls it provider_id. Matching them keeps the joins obvious.
+        //
+        // reporter_id is the member who filed it. Both CASCADE, so deleting
+        // a listing or a member takes their reports with them and the queue
+        // can never show a report about a listing that no longer exists.
+        //
+        // There is NO unique key on (provider_id, reporter_id) on purpose:
+        // "one open report per member per listing" has to be checked in
+        // code, because the rule is about *open* ones — a member whose
+        // report was dismissed must be able to report the same listing again
+        // later, and a unique index would silently refuse that.
+        // ------------------------------------------------------------------
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS profile_reports (
+                id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                provider_id     INT UNSIGNED NOT NULL,
+                reporter_id     INT UNSIGNED NOT NULL,
+                reason_code     VARCHAR(40)  NOT NULL,
+                details         TEXT         NULL,
+                evidence_image  VARCHAR(255) NULL,
+                status          ENUM(\'pending\', \'resolved\', \'dismissed\')
+                                    NOT NULL DEFAULT \'pending\',
+                admin_notes     TEXT         NULL,
+                listing_blocked TINYINT(1)   NOT NULL DEFAULT 0,
+                resolved_by     INT UNSIGNED NULL,
+                resolved_at     TIMESTAMP    NULL DEFAULT NULL,
+                created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                KEY idx_reports_queue (status, created_at),
+                KEY idx_reports_listing (provider_id, status),
+                KEY idx_reports_reporter (reporter_id, id),
+                CONSTRAINT fk_reports_listing FOREIGN KEY (provider_id)
+                    REFERENCES providers (id) ON DELETE CASCADE,
+                CONSTRAINT fk_reports_reporter FOREIGN KEY (reporter_id)
+                    REFERENCES users (id) ON DELETE CASCADE,
+                CONSTRAINT fk_reports_admin FOREIGN KEY (resolved_by)
+                    REFERENCES admins (id) ON DELETE SET NULL
+            ) ENGINE = InnoDB'
+        );
+
+        // ------------------------------------------------------------------
+        // providers.profile_code — the public "IslaProfile ID"
+        //
+        // Every listing gets a stable reference an admin can quote over the
+        // phone ("that's ISLA-000142"). It is derived from the primary key
+        // (see isla_profile_code() in include/listing_ref.php), so it is
+        // unique by construction and needs no extra sequence.
+        //
+        // NULL-able, which is what lets the column be added without touching
+        // existing rows, and the backfill below fills them in.
+        // ------------------------------------------------------------------
+        if (!isla_schema_has_column($pdo, 'providers', 'profile_code')) {
+            $pdo->exec('ALTER TABLE providers ADD COLUMN profile_code VARCHAR(20) NULL AFTER id');
+        }
+
+        // Backfill anything without a code. Self-limiting (only NULL/empty
+        // rows match) and idempotent, so it is also the repair step for a run
+        // that was interrupted between the ALTER and the backfill.
+        if ($pdo->query(
+            "SELECT 1 FROM providers WHERE profile_code IS NULL OR profile_code = '' LIMIT 1"
+        )->fetchColumn()) {
+            $pdo->exec(
+                "UPDATE providers
+                    SET profile_code = CONCAT('ISLA-', LPAD(id, 6, '0'))
+                  WHERE profile_code IS NULL OR profile_code = ''"
+            );
+        }
+
+        // Unique last, once no row is left NULL. (A unique index tolerates
+        // NULLs, so this would have succeeded either way — ordering it here
+        // keeps the invariant "no listing without a code" true.)
+        if (!isla_schema_has_index($pdo, 'providers', 'uq_providers_profile_code')) {
+            $pdo->exec('ALTER TABLE providers ADD UNIQUE KEY uq_providers_profile_code (profile_code)');
+        }
+
+        // ------------------------------------------------------------------
+        // providers.status + blocked_* — moderation state
+        //
+        // 'active' is the default, so every existing row is live and nothing
+        // disappears when these columns land. A blocked listing is hidden
+        // from the feed, the catalogue, search and every other public query
+        // (they all filter on status = 'active'); the owner still sees their
+        // own listing with a "blocked" badge so the block is never a mystery.
+        // ------------------------------------------------------------------
+        if (!isla_schema_has_column($pdo, 'providers', 'status')) {
+            $pdo->exec("ALTER TABLE providers ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active' AFTER profile_type");
+        }
+        if (!isla_schema_has_column($pdo, 'providers', 'blocked_at')) {
+            $pdo->exec('ALTER TABLE providers ADD COLUMN blocked_at TIMESTAMP NULL DEFAULT NULL');
+        }
+        if (!isla_schema_has_column($pdo, 'providers', 'blocked_reason')) {
+            $pdo->exec('ALTER TABLE providers ADD COLUMN blocked_reason VARCHAR(255) NULL DEFAULT NULL');
         }
     } catch (PDOException $e) {
         // Logged, never fatal: the app keeps working, only the new

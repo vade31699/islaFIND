@@ -36,7 +36,7 @@ if ($providerId <= 0) {
 }
 
 // --- 5. Load the listing (must exist) ---------------------------
-$stmt = $pdo->prepare('SELECT id, profile_type, name, selected_title FROM providers WHERE id = :id LIMIT 1');
+  $stmt = $pdo->prepare('SELECT id, profile_type, name, selected_title FROM providers WHERE id = :id AND status = \'active\' LIMIT 1');
 $stmt->execute([':id' => $providerId]);
 $provider = $stmt->fetch();
 

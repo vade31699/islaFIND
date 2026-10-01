@@ -13,10 +13,12 @@
     "scripts": {
         "test": [
             "@php dashboard_smoke_test.php",
-            "@php render_smoke_test.php"
+            "@php render_smoke_test.php",
+            "@php admin_flow_test.php"
         ],
         "serve": "php -S localhost:8000",
-        "schema": "@php -r \"echo 'Import final_app.sql with HeidiSQL or phpMyAdmin', PHP_EOL;\""
+        "schema": "@php -r \"echo 'Import final_app.sql with HeidiSQL or phpMyAdmin', PHP_EOL;\"",
+        "create-admin": "@php tools/create_admin.php"
     },
     "config": {
         "sort-packages": true

@@ -30,7 +30,16 @@ session_harden(); // must run before session_start()
 // challenge data, and the CSRF token.
 session_start();
 
-// Already logged in? Skip the forms and go straight to the dashboard.
+// Already logged in? Skip the forms and go straight to the app.
+// An admin session wins over a member one: an admin who is also a
+// member (rare, but possible) should land in the admin panel from the
+// login URL rather than being bounced to their member dashboard. The
+// two sessions are separate keys, so this is a choice about the landing
+// page, not about merging identities.
+if (isset($_SESSION['admin_id'])) {
+    header('Location: ' . sid_append('admin/index.php'));
+    exit; // Stop executing the rest of this file
+}
 if (isset($_SESSION['user_id'])) {
     header('Location: ' . sid_append('dashboard.php'));
     exit; // Stop executing the rest of this file
@@ -42,6 +51,11 @@ require_once __DIR__ . '/../include/db.php';
 
 // mailer.php loads .env and provides sendVerificationEmail().
 require_once __DIR__ . '/../include/mailer.php';
+
+// admin_auth.php adds the superadmin identity: the `admins` table is
+// checked by the same form below, and a successful admin sign-in lands
+// on the admin panel instead of the member dashboard.
+require_once __DIR__ . '/../include/admin_auth.php';
 
 // --- 4. Page state ---------------------------------------------
 // $errors:       field-name => message for every failed check
@@ -79,15 +93,23 @@ $justDeleted = isset($_GET['deleted']) && $_GET['deleted'] === '1';
 if (isset($_GET['cancel_verify'])) {
     unset($_SESSION['pending_verify']);
     unset($_SESSION['mfa']);
+    unset($_SESSION['admin_mfa'], $_SESSION['admin_mfa_error']);
     header('Location: ' . sid_append('login.php'));
     exit;
 }
 
 // --- 5. Resolve which panel the page should open on -------------
-// Priority: MFA challenge > email verification > password reset
-// > forgot request > register > login.
+// Priority: admin MFA challenge > MFA challenge > email verification
+// > password reset > forgot request > register > login.
+//
+// The admin challenge is checked FIRST and on its own: an admin sign-in
+// and a member sign-in are different sessions with different outcomes,
+// and a page that tried to resolve them together could end up
+// completing the member login while an admin code sat unanswered.
 $initialPanel = 'login';
-if (isset($_SESSION['mfa'])) {
+if (isset($_SESSION['admin_mfa'])) {
+    $initialPanel = 'verify';                       // admin code entry
+} elseif (isset($_SESSION['mfa'])) {
     $initialPanel = 'verify';                       // MFA code entry
 } elseif (isset($_GET['verify']) && isset($_SESSION['pending_verify'])) {
     $initialPanel = 'verify';                       // emailed-code entry
@@ -98,6 +120,14 @@ if (isset($_SESSION['mfa'])) {
 } elseif (isset($_GET['panel']) && $_GET['panel'] === 'register') {
     $initialPanel = 'register';                     // deep link to signup
 }
+
+// login.php?admin=1 is set by admin_require_login() when somebody opens
+// an admin page without an admin session. The form is unchanged — a
+// separate admin sign-in form would be a second place to get CSRF,
+// throttling and wording wrong — but the login panel says plainly who
+// this path is for, so a superadmin who followed a stale bookmark knows
+// to type their admin address rather than hunting for another page.
+$adminSignIn = isset($_GET['admin']);
 
 // --- 6. Track a successful login as a device -------------------
 // Called after any full login (normal or MFA). Inserts one row
@@ -194,52 +224,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // control from the POST body, so name-based routing would skip
         // this branch entirely.
         if (($_POST['verify_action'] ?? '') === 'resend' || isset($_POST['resend'])) {
-            // Which challenge is this for? One button serves the MFA
-            // challenge and the registration code, so both get the same
-            // policy: a cooldown between sends, and a hard cap on how
-            // long the challenge may live in total.
-            $ctx = isset($_SESSION['mfa'])
-                ? 'mfa'
-                : (isset($_SESSION['pending_verify']) ? 'verify' : null);
-
-            if ($ctx === null) {
-                $errors['form'] = 'No verification request is pending.';
+            // ---- Superadmin challenge (its own policy) ----------
+            // Handled by admin_auth.php, which owns the resend cooldown
+            // and the hard cap for the admin challenge. It runs first and
+            // exclusively: an admin session must never fall through into
+            // the member resend branch, which would email a member code
+            // and write to the `users` table.
+            if (isset($_SESSION['admin_mfa'])) {
+                $errors['form'] = admin_resend_challenge($pdo, 'Your islaFIND admin sign-in code') ?? '';
             } else {
-                // Work on the session array directly (by reference) so the
-                // same code below can serve both contexts.
-                $challenge = &$_SESSION[$ctx === 'mfa' ? 'mfa' : 'pending_verify'];
+                // Which challenge is this for? One button serves the MFA
+                // challenge and the registration code, so both get the same
+                // policy: a cooldown between sends, and a hard cap on how
+                // long the challenge may live in total.
+                $ctx = isset($_SESSION['mfa'])
+                    ? 'mfa'
+                    : (isset($_SESSION['pending_verify']) ? 'verify' : null);
 
-                $wait      = (int) ($challenge['resend_available_at'] ?? 0) - time();
-                $expiresAt = (int) ($challenge['started_at'] ?? time()) + CODE_TOTAL_LIFETIME;
-
-                if ($expiresAt <= time()) {
-                    // The challenge is fully spent: no further codes. The
-                    // user has to sign in again, which re-checks the
-                    // password instead of leaning on this challenge.
-                    $errors['form'] = 'This verification request has expired. Please sign in again.';
-                } elseif ($wait > 0) {
-                    // Too soon: refuse to send, and say how long to wait.
-                    $errors['form'] = 'Please wait ' . $wait
-                        . ' more second(s) before requesting another code.';
+                if ($ctx === null) {
+                    $errors['form'] = 'No verification request is pending.';
                 } else {
-                    $code = (string) random_int(100000, 999999);
-                    $challenge['code'] = $code;
-                    // This code gets a fresh CODE_TTL, but never past
-                    // the cap on the challenge as a whole.
-                    $challenge['expires'] = min(time() + CODE_TTL, $expiresAt);
-                    $challenge['resend_available_at'] = time() + CODE_RESEND_COOLDOWN;
+                    // Work on the session array directly (by reference) so the
+                    // same code below can serve both contexts.
+                    $challenge = &$_SESSION[$ctx === 'mfa' ? 'mfa' : 'pending_verify'];
 
-                    if ($ctx === 'mfa') {
-                        $challenge['emailed'] = sendMfaEmail($challenge['email'] ?? '', $code);
+                    $wait      = (int) ($challenge['resend_available_at'] ?? 0) - time();
+                    $expiresAt = (int) ($challenge['started_at'] ?? time()) + CODE_TOTAL_LIFETIME;
+
+                    if ($expiresAt <= time()) {
+                        // The challenge is fully spent: no further codes. The
+                        // user has to sign in again, which re-checks the
+                        // password instead of leaning on this challenge.
+                        $errors['form'] = 'This verification request has expired. Please sign in again.';
+                    } elseif ($wait > 0) {
+                        // Too soon: refuse to send, and say how long to wait.
+                        $errors['form'] = 'Please wait ' . $wait
+                            . ' more second(s) before requesting another code.';
                     } else {
-                        $challenge['emailed'] = sendVerificationEmail($challenge['email'] ?? '', $code);
-                        // Registration codes also live on the user row, so
-                        // keep that copy in step with the session one.
-                        $stmt = $pdo->prepare('UPDATE users SET verification_code = :code WHERE email = :email');
-                        $stmt->execute([':code' => $code, ':email' => $challenge['email'] ?? '']);
+                        $code = (string) random_int(100000, 999999);
+                        $challenge['code'] = $code;
+                        // This code gets a fresh CODE_TTL, but never past
+                        // the cap on the challenge as a whole.
+                        $challenge['expires'] = min(time() + CODE_TTL, $expiresAt);
+                        $challenge['resend_available_at'] = time() + CODE_RESEND_COOLDOWN;
+
+                        if ($ctx === 'mfa') {
+                            $challenge['emailed'] = sendMfaEmail($challenge['email'] ?? '', $code);
+                        } else {
+                            $challenge['emailed'] = sendVerificationEmail($challenge['email'] ?? '', $code);
+                            // Registration codes also live on the user row, so
+                            // keep that copy in step with the session one.
+                            $stmt = $pdo->prepare('UPDATE users SET verification_code = :code WHERE email = :email');
+                            $stmt->execute([':code' => $code, ':email' => $challenge['email'] ?? '']);
+                        }
                     }
+                    unset($challenge);
                 }
-                unset($challenge);
             }
         }
 
@@ -250,6 +290,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($code === '') {                       // Must not be empty
                 $errors['verify_code'] = 'Please enter the verification code.';
+            } elseif (isset($_SESSION['admin_mfa'])) {
+                // ---- Admin sign-in challenge ---------------------
+                // Judgeed by admin_auth.php, which owns the guess limit
+                // and the session rules. On success the login is
+                // completed HERE and the script stops, so the member
+                // branches below never run for an admin session.
+                $challenge = admin_check_challenge($code, 'Your islaFIND admin sign-in code');
+
+                if ($challenge === null) {
+                    $errors['form'] = (string) ($_SESSION['admin_mfa_error'] ?? 'Invalid verification code.');
+                } else {
+                    $admin = admin_complete_login($pdo, (int) $challenge['admin_id']);
+
+                    if ($admin === null) {
+                        // Deactivated or deleted while the code was in
+                        // the inbox. Say nothing more than that it failed.
+                        $errors['form'] = 'This admin account can no longer sign in.';
+                    } else {
+                        header('Location: ' . sid_append('admin/index.php'));
+                        exit;
+                    }
+                }
             } elseif (isset($_SESSION['mfa'])) {
                 // ---- MFA challenge passed? -----------------------
                 $mfa = $_SESSION['mfa'];
@@ -725,99 +787,146 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // --- Look up the user and verify the password ------------
         if (empty($errors)) {
 
-            // Prepared statement: find ONE user whose email OR phone
-            // matches what was typed. Placeholder prevents SQL injection.
-            $stmt = $pdo->prepare(
-                'SELECT id, user_id, full_name, email, phone, date_of_birth,
-                        password_hash, is_verified, mfa_enabled
-                 FROM users
-                 WHERE email = :identifier OR phone = :identifier
-                 LIMIT 1'
-            );
-            $stmt->execute([':identifier' => $identifier]);
-            $user = $stmt->fetch();
+            // ---- Superadmin first: the same field takes either ----
+            // An admin account is not a member account, so the `admins`
+            // table is checked before `users` — but a MISS here is not a
+            // failure: admin_verify_password() does the same work either
+            // way, so the code falls through to the member lookup below
+            // and a member sign-in behaves exactly as before.
+            //
+            // What this buys: one login form for both, one throttle
+            // counting both, and no second password-entry screen to keep
+            // in step with this one.
+            $adminAccount = admin_account($pdo, $identifier);
 
-            if ($user && password_verify($password, $user['password_hash'])) {
-
-                // The password was RIGHT: forget the failed-attempt
-                // streak for both counters before anything else.
-                // Every branch below — unverified account, MFA,
-                // normal login — has already proved the password, so
-                // none of them should leave the user sitting in a
-                // backoff.
+            if (admin_verify_password($adminAccount, $password)) {
+                // Password correct: clear the streak for both counters
+                // before anything else, exactly as the member path does.
                 login_throttle_clear($pdo, $identifier);
 
-                // ---- Account must be email-verified first -------
-                if ((int) $user['is_verified'] !== 1) {
-                    // Issue a fresh code and email it to the account
-                    // address; the user confirms it on the verify panel.
-                    $code = (string) random_int(100000, 999999);
-                    $stmt = $pdo->prepare('UPDATE users SET verification_code = :code WHERE id = :id');
-                    $stmt->execute([':code' => $code, ':id' => $user['id']]);
-                    $_SESSION['pending_verify'] = [
-                        'email'   => $user['email'],
-                        'code'    => $code,
-                        'expires' => time() + CODE_TTL,  // valid for CODE_TTL seconds
-                        'started_at' => time(),        // the challenge as a whole is capped
-                        'resend_available_at' => time() + CODE_RESEND_COOLDOWN,
-                        'emailed' => sendVerificationEmail($user['email'], $code),
-                    ];
-                    header('Location: ' . sid_append('login.php?verify=1'));
-                    exit;
-                }
-
-                // ---- MFA: require a one-time code before login --
-                // The code is E-MAILED to the address already registered
-                // on the account (this stack has no SMS provider), so the
-                // second factor travels a channel the user controls.
-                // 'emailed' records whether SMTP accepted it: when it did
-                // not, the panel shows the code instead of locking the
-                // user out of their own account.
-                if ((int) $user['mfa_enabled'] === 1) {
-                    $code = (string) random_int(100000, 999999);
-                    $_SESSION['mfa'] = [
-                        'user_id' => (int) $user['id'],
-                        'email'   => $user['email'],  // where the code is sent
-                        'code'    => $code,
-                        'expires' => time() + CODE_TTL, // valid for CODE_TTL seconds
-                        'started_at' => time(),       // the challenge as a whole is capped
-                        'resend_available_at' => time() + CODE_RESEND_COOLDOWN,
-                        'emailed' => sendMfaEmail($user['email'], $code),
-                    ];
+                // Email code as the second factor when the account has it
+                // (on by default; see tools/create_admin.php).
+                if ((int) $adminAccount['mfa_enabled'] === 1) {
+                    admin_begin_challenge($pdo, $adminAccount, 'Your islaFIND admin sign-in code');
                     header('Location: ' . sid_append('login.php?mfa=1'));
                     exit;
                 }
 
-                // ---- Normal login --------------------------------
-                // Rotate the CSRF token on privilege change.
-                unset($_SESSION['csrf_token']);
+                $admin = admin_complete_login($pdo, (int) $adminAccount['id']);
 
-                // Fresh session ID to prevent session fixation.
-                session_regenerate_id(true);
-
-                // Store the logged-in user's identity in the session.
-                $_SESSION['user_id']        = (int) $user['id'];     // internal id
-                $_SESSION['user_id_custom'] = (int) $user['user_id']; // 0-500,000 id
-                $_SESSION['full_name']      = $user['full_name'];
-                $_SESSION['email']          = $user['email'];
-
-                // Record this login as a device (Device Login list).
-                trackDevice($pdo, (int) $user['user_id']);
-
-                header('Location: ' . sid_append('dashboard.php'));
-                exit;
+                if ($admin === null) {
+                    // Passed the password but the account is no longer
+                    // usable — re-read after a deactivation, say nothing
+                    // more than that the sign-in failed.
+                    login_throttle_record_failure($pdo, $identifier);
+                    $errors['form'] = 'Invalid email/phone or password.';
+                } else {
+                    header('Location: ' . sid_append('admin/index.php'));
+                    exit;
+                }
             }
 
-            // Wrong credentials. Record the failure against both
-            // counters FIRST, then show ONE generic message so we
-            // never reveal whether the account exists.
+            // Prepared statement: find ONE user whose email OR phone
+            // matches what was typed. Placeholder prevents SQL injection.
             //
-            // Only a failure that reached a real password comparison
-            // is counted: an attempt the throttle turned away above
-            // never gets this far, which is what stops an attacker
-            // from renewing somebody else's backoff forever.
-            login_throttle_record_failure($pdo, $identifier);
-            $errors['form'] = 'Invalid email/phone or password.';
+            // Only reached when the admin check above did not already
+            // settle the outcome. A member sign-in gets here exactly as it
+            // did before this feature existed: admin_account() found no
+            // admin with that address and admin_verify_password() returned
+            // false without deciding anything.
+            if (empty($errors)) {
+                $stmt = $pdo->prepare(
+                    'SELECT id, user_id, full_name, email, phone, date_of_birth,
+                            password_hash, is_verified, mfa_enabled
+                     FROM users
+                     WHERE email = :identifier OR phone = :identifier
+                     LIMIT 1'
+                );
+                $stmt->execute([':identifier' => $identifier]);
+                $user = $stmt->fetch();
+
+                if ($user && password_verify($password, $user['password_hash'])) {
+
+                    // The password was RIGHT: forget the failed-attempt
+                    // streak for both counters before anything else.
+                    // Every branch below — unverified account, MFA,
+                    // normal login — has already proved the password, so
+                    // none of them should leave the user sitting in a
+                    // backoff.
+                    login_throttle_clear($pdo, $identifier);
+
+                    // ---- Account must be email-verified first -------
+                    if ((int) $user['is_verified'] !== 1) {
+                        // Issue a fresh code and email it to the account
+                        // address; the user confirms it on the verify panel.
+                        $code = (string) random_int(100000, 999999);
+                        $stmt = $pdo->prepare('UPDATE users SET verification_code = :code WHERE id = :id');
+                        $stmt->execute([':code' => $code, ':id' => $user['id']]);
+                        $_SESSION['pending_verify'] = [
+                            'email'   => $user['email'],
+                            'code'    => $code,
+                            'expires' => time() + CODE_TTL,  // valid for CODE_TTL seconds
+                            'started_at' => time(),        // the challenge as a whole is capped
+                            'resend_available_at' => time() + CODE_RESEND_COOLDOWN,
+                            'emailed' => sendVerificationEmail($user['email'], $code),
+                        ];
+                        header('Location: ' . sid_append('login.php?verify=1'));
+                        exit;
+                    }
+
+                    // ---- MFA: require a one-time code before login --
+                    // The code is E-MAILED to the address already registered
+                    // on the account (this stack has no SMS provider), so the
+                    // second factor travels a channel the user controls.
+                    // 'emailed' records whether SMTP accepted it: when it did
+                    // not, the panel shows the code instead of locking the
+                    // user out of their own account.
+                    if ((int) $user['mfa_enabled'] === 1) {
+                        $code = (string) random_int(100000, 999999);
+                        $_SESSION['mfa'] = [
+                            'user_id' => (int) $user['id'],
+                            'email'   => $user['email'],  // where the code is sent
+                            'code'    => $code,
+                            'expires' => time() + CODE_TTL, // valid for CODE_TTL seconds
+                            'started_at' => time(),       // the challenge as a whole is capped
+                            'resend_available_at' => time() + CODE_RESEND_COOLDOWN,
+                            'emailed' => sendMfaEmail($user['email'], $code),
+                        ];
+                        header('Location: ' . sid_append('login.php?mfa=1'));
+                        exit;
+                    }
+
+                    // ---- Normal login --------------------------------
+                    // Rotate the CSRF token on privilege change.
+                    unset($_SESSION['csrf_token']);
+
+                    // Fresh session ID to prevent session fixation.
+                    session_regenerate_id(true);
+
+                    // Store the logged-in user's identity in the session.
+                    $_SESSION['user_id']        = (int) $user['id'];     // internal id
+                    $_SESSION['user_id_custom'] = (int) $user['user_id']; // 0-500,000 id
+                    $_SESSION['full_name']      = $user['full_name'];
+                    $_SESSION['email']          = $user['email'];
+
+                    // Record this login as a device (Device Login list).
+                    trackDevice($pdo, (int) $user['user_id']);
+
+                    header('Location: ' . sid_append('dashboard.php'));
+                    exit;
+                }
+
+                // Wrong credentials. Record the failure against both
+                // counters FIRST, then show ONE generic message so we
+                // never reveal whether the account exists.
+                //
+                // Only a failure that reached a real password comparison
+                // is counted: an attempt the throttle turned away above
+                // never gets this far, which is what stops an attacker
+                // from renewing somebody else's backoff forever.
+                login_throttle_record_failure($pdo, $identifier);
+                $errors['form'] = 'Invalid email/phone or password.';
+            }
         }
     }
 }
@@ -826,6 +935,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // The title/subtitle/footer change with the active panel; these are
 // computed server-side so the correct text shows even without JS.
 $mfaMode = isset($_SESSION['mfa']);
+// The admin sign-in challenge shares this panel with the member code
+// entry but is a different thing: a superadmin proving a second factor
+// for a privileged session, not a member finishing a sign-in.
+$adminMfaMode = isset($_SESSION['admin_mfa']);
 $panelTitle    = 'Login';
 $panelSubtitle = 'Sign in with your email or phone number';
 $footerQuestion = 'No account yet?';
@@ -840,10 +953,14 @@ if ($initialPanel === 'register') {
     $footerQuestion = 'Already have an account?';
     $footerLink     = 'Log in';
 } elseif ($initialPanel === 'verify') {
-    $panelTitle    = $mfaMode ? 'Two-Factor Authentication' : 'Verify your email';
-    $panelSubtitle = $mfaMode
-        ? 'Enter the one-time code we emailed to your registered address'
-        : 'Enter the code we emailed to you to confirm your account';
+    $panelTitle    = $adminMfaMode
+        ? 'Superadmin Verification'
+        : ($mfaMode ? 'Two-Factor Authentication' : 'Verify your email');
+    $panelSubtitle = $adminMfaMode
+        ? 'Enter the one-time code we emailed to your admin address'
+        : ($mfaMode
+            ? 'Enter the one-time code we emailed to your registered address'
+            : 'Enter the code we emailed to you to confirm your account');
     // No footer: the verify panel's own "Back to login" link already
     // clears the pending verification and returns to the login panel.
     $footerQuestion = '';
@@ -877,7 +994,7 @@ if ($initialPanel === 'register') {
 // down and keep their request/resend button disabled until it passes.
 // 0 means "a code may be requested right now".
 $verifyWait = 0;                       // verify panel (MFA / registration)
-foreach (['mfa', 'pending_verify'] as $ctxKey) {
+foreach (['mfa', 'admin_mfa', 'pending_verify'] as $ctxKey) {
     if (isset($_SESSION[$ctxKey]['resend_available_at'])) {
         $verifyWait = max(0, (int) $_SESSION[$ctxKey]['resend_available_at'] - time());
         break;
@@ -953,6 +1070,19 @@ include __DIR__ . '/../include/head_meta.php';
                         <!-- Red alert shown when the credentials are wrong -->
                         <?php if (isset($errors['form']) && $initialPanel === 'login'): ?>
                             <div class="alert alert-error" role="alert"><?php echo htmlspecialchars($errors['form']); ?></div>
+                        <?php endif; ?>
+
+                        <!-- Shown only when somebody arrived here from an
+                             admin page (admin_require_login sends
+                             ?admin=1). It changes nothing about the form —
+                             one form serves both — it just tells a superadmin
+                             which address to type, so they are not left
+                             hunting for a second sign-in page. -->
+                        <?php if ($adminSignIn): ?>
+                            <div class="alert alert-info" role="status">
+                                Superadmin sign-in — enter your admin email address and password below,
+                                then the code we email you.
+                            </div>
                         <?php endif; ?>
 
                         <form action="login.php" method="POST" novalidate>
@@ -1190,7 +1320,11 @@ include __DIR__ . '/../include/head_meta.php';
                              e-mailed (unconfigured SMTP / send failure).
                              When the mailer delivers the code, nothing is
                              revealed on screen. -->
-                        <?php if ($mfaMode && ($_SESSION['mfa']['emailed'] ?? false) !== true): ?>
+                        <?php if ($adminMfaMode && ($_SESSION['admin_mfa']['emailed'] ?? false) !== true): ?>
+                            <div class="alert alert-info" role="status">SIMULATED EMAIL — your admin code could not be emailed and is shown here instead:
+                                <strong><?php echo htmlspecialchars($_SESSION['admin_mfa']['email'] ?? ''); ?></strong><br>
+                                Code: <strong><?php echo htmlspecialchars($_SESSION['admin_mfa']['code'] ?? ''); ?></strong></div>
+                        <?php elseif ($mfaMode && ($_SESSION['mfa']['emailed'] ?? false) !== true): ?>
                             <div class="alert alert-info" role="status">SIMULATED EMAIL — your MFA code could not be emailed and is shown here instead:
                                 <strong><?php echo htmlspecialchars($_SESSION['mfa']['email'] ?? ''); ?></strong><br>
                                 Code: <strong><?php echo htmlspecialchars($_SESSION['mfa']['code']); ?></strong></div>
@@ -1438,6 +1572,9 @@ include __DIR__ . '/../include/head_meta.php';
         // Whether the verify panel is showing an MFA challenge (true)
         // or a registration emailed code (false) — affects its heading.
         const mfaMode = <?php echo $mfaMode ? 'true' : 'false'; ?>;
+        // …and whether that challenge belongs to a superadmin sign-in,
+        // which is a third heading and its own sentence.
+        const adminMfaMode = <?php echo $adminMfaMode ? 'true' : 'false'; ?>;
 
         // The five panels inside the sliding track (for height syncing).
         const loginPanel    = document.getElementById('loginPanel');
@@ -1483,12 +1620,14 @@ include __DIR__ . '/../include/head_meta.php';
                 toggleQuestion.textContent = 'Already have an account?';
                 toggleLink.textContent = 'Log in';
             } else if (panel === 'verify') {
-                authTitle.textContent = mfaMode
-                    ? 'Two-Factor Authentication'
-                    : 'Verify your email';
-                authSubtitle.textContent = mfaMode
-                    ? 'Enter the one-time code we emailed to your registered address'
-                    : 'Enter the code we emailed to you to confirm your account';
+                authTitle.textContent = adminMfaMode
+                    ? 'Superadmin Verification'
+                    : (mfaMode ? 'Two-Factor Authentication' : 'Verify your email');
+                authSubtitle.textContent = adminMfaMode
+                    ? 'Enter the one-time code we emailed to your admin address'
+                    : (mfaMode
+                        ? 'Enter the one-time code we emailed to your registered address'
+                        : 'Enter the code we emailed to you to confirm your account');
                 toggleQuestion.textContent = '';
                 toggleLink.textContent = '';
             } else if (panel === 'forgot') {

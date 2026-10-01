@@ -45,6 +45,29 @@ hand-written JavaScript files.
   album.
 - **Password strength meter** on sign-up, reset and change-password.
 
+### Reporting & superadmin
+- **Report a listing** from its detail modal: a whitelisted reason, an optional
+  note and an optional JPG/PNG screenshot (3 MB). One open report per member per
+  listing, and five reports an hour per member.
+- **A moderation queue** — every report with who filed it, what they said, the
+  evidence, the listing as members see it, and the reports already filed against
+  that listing. Actions: block the listing, mark resolved, or dismiss, each with
+  a note.
+- **Blocking takes a listing off the island.** A blocked listing leaves the
+  feed, the catalogue, search, saved lists, messages, hiring and view-tracking,
+  and its deep link stops resolving — to a member it is indistinguishable from
+  a listing that never existed. Its **owner** still sees it, with the reason,
+  so they can fix it and ask for a review.
+- **A separate superadmin identity.** `admins` is not a kind of user: it has
+  its own table, its own session key and its own login branch, and no member
+  page can reach it.
+- **Accounts are created from the server, never by sign-up** —
+  `php tools/create_admin.php`, with the password typed in blind. Everything
+  about the account is then changeable in the panel: email (proved with a code
+  sent to the *new* address), password, and two-factor on/off.
+- **Email codes instead of an authenticator app** — no TOTP, no QR, nothing to
+  enrol. Two-factor is on by default and costs one email per sign-in.
+
 ### islaFIND profiles
 - **Individual Skills** listings (a person's trade) and **Business** listings
   (a shop, resort, rental), each with its own set of categories.
@@ -159,7 +182,7 @@ The repository is split so that **only `public/` is ever served**:
 | ------ | ----- | -------------- |
 | `public/` | The document root: every page (`index.php`, `login.php`, `dashboard.php`, `messenger.php`, `create_profile.php`, `404.php`), every POST handler and JSON endpoint, plus `style.css`, the hand-written `.js` files, `img/`, `uploads/`, `manifest.webmanifest`, `robots.txt` and the `.htaccess` that hardens the web root. | Yes — this is the document root |
 | `include/` | The shared PHP includes: `db.php`, `env.php`, `security.php`, `categories.php`, `mailer.php`, `head_meta.php`, `notifications_bell.php`. Pages reach them with `require_once __DIR__ . '/../include/x.php'`. | No |
-| project root | Configuration and tooling that must never be fetched: `.env`, `certs/`, `composer.json`/`composer.lock`, `vendor/`, `final_app.sql`, the two smoke tests and the CLI-only developer utilities. | No |
+| project root | Configuration and tooling that must never be fetched: `.env`, `certs/`, `composer.json`/`composer.lock`, `vendor/`, `final_app.sql`, the three smoke tests, the `tools/` CLI and the CLI-only developer utilities. | No |
 
 That split is what keeps the credentials in `.env` (and the CA
 certificate, and the database dump) out of reach of a browser: they are
@@ -226,6 +249,13 @@ host (Docker, CI, production) can override any key without touching the file.
 | `public/create_profile.php` | Create / edit an islaFIND listing (type, title, address, pin). |
 | `public/404.php` | Branded "page not found" screen (wired up in `public/.htaccess`). |
 | `public/home_feed.php` · `public/rate_modal.php` | Legacy compatibility wrappers from the original plan: thin redirects into the dashboard's Home tab and the messenger's rating flow. No logic is duplicated. |
+| `public/report_listing.php` | Files a listing report: a whitelisted reason, an optional note and an optional JPG/PNG screenshot. |
+| `public/admin/index.php` | The superadmin panel: overview, the report queue, and one report in full. One shell, three views. |
+| `public/admin/views/` | The three panel bodies, split out of `index.php` so the shell (guard, data, sidebar) is not repeated: `overview.php` (counts + newest reports), `reports.php` (the filterable queue), `report.php` (one report, the listing, the actions). |
+| `public/admin.css` | The panel's own stylesheet, loaded after `style.css`. Every rule is namespaced `.adm-*`, and the block below re-scopes the shared `.btn` / `.field-*` controls for a desktop panel. |
+| `public/admin/settings.php` | The admin's own email, password and two-factor setting. |
+| `public/admin/action.php` | Every moderation decision (block, unblock, resolve, dismiss) — POST + CSRF. |
+| `public/admin/logout.php` | Ends an admin session (POST, like every other state change). |
 
 **Handlers** (POST endpoints) — all in `public/`
 
@@ -246,7 +276,9 @@ handler, three actions) ·
 a connection — shared with the session store) · `env.php` (.env loader) ·
 `session_store.php` (opt-in MySQL session handler) · `uploads.php` (opt-in storage
 seam for the account avatar and listing pictures) · `categories.php` (types,
-categories, barangays, map centres) · `mailer.php` · `head_meta.php` (shared
+categories, barangays, map centres) · `mailer.php` · `admin_auth.php` (superadmin
+identity, email-code challenges and guards — separate from member identity on
+purpose) · `reporting.php` (report reasons, IslaProfile IDs) · `head_meta.php` (shared
 `<head>`) · `notifications_bell.php`
 
 **Web root, configuration and assets** (in `public/`) — `.htaccess` (branded
@@ -258,20 +290,27 @@ app) · `robots.txt` · `style.css` · `busy.js` (loading states) ·
 
 **Project root** — `.htaccess` (forwards local requests into `public/`) ·
 `.gitignore` · `.gitattributes` · `composer.json` / `composer.lock` ·
-`final_app.sql` · `certs/`
+`final_app.sql` · `certs/` · `tools/` (CLI-only: `create_admin.php`) ·
+the three smoke tests
 
 ---
 
 ## Testing
 
-Two dependency-free smoke tests (no PHPUnit) run from the project root:
+Three dependency-free smoke tests (no PHPUnit) run from the project root:
 
 ```bash
 php dashboard_smoke_test.php        # links/assets resolve + the pages load over HTTP
 php render_smoke_test.php           # every page renders for a SIGNED-IN user, with warnings on
+php admin_flow_test.php             # reporting + moderation, end to end (NEEDS the database)
 
-composer test                       # runs the two PHP smoke tests
+composer test                       # runs all three
 ```
+
+The first two need no database (the pages redirect to login before touching it),
+so they pass on a machine with MySQL stopped. **`admin_flow_test.php` does need
+one** — it creates a throwaway admin, two members and a listing, then drives a
+real report through the real handlers into the real moderation queue.
 
 What they cover:
 
@@ -279,6 +318,16 @@ What they cover:
   dashboard exists, the shared head is used everywhere, the manifest parses,
   dev scripts are CLI-only, and `login.php` is wired to the throttle helpers
   *before* it verifies a password (with no lockout state left in the session).
+  It also holds the report-UI guards, because that form is the one thing a
+  member uses to reach a human and it fails silently when it breaks: the report
+  button exists and starts hidden, the modal carries a reason, a note and a
+  screenshot field, the reasons are rendered *from the same whitelist the
+  handler validates against* (so the two lists cannot drift apart), the form
+  posts with a CSRF token, and **the form is reset before the listing id is
+  filled in** — `form.reset()` restores every control to its markup default,
+  and the hidden listing-id input's default is empty, so the other order
+  submits a perfectly valid-looking report with no listing attached and nothing
+  else in the suite would notice.
   It also holds the catalogue guards (the profile-type toggle, the category
   chips, the sort control, the Save heart beside the name, and the
   `id="listing-N"` anchor being rendered by the catalogue cards only) and the
@@ -323,10 +372,39 @@ and confirms a refused attempt is not counted again. Every key it uses is a
    checks builds the state it needs instead of looking for it in the database: a
    check that quietly skips itself when the data happens to be missing is worse
    than no check, because the suite still reports green.
+- **`admin_flow_test.php`** — the report → moderation → block path, driven over
+   HTTP against the real database. It signs a member and an admin in through the
+   real login form (so the guard, the CSRF token and the session cookies are all
+   exercised rather than stubbed), then asserts:
+   - **Guards** — a logged-out visitor and a *member* session are both kept out
+     of `/admin/`.
+   - **Settings** — the admin can change their own password; a missing CSRF
+     token, a wrong current password, a mismatched confirmation and a too-weak
+     password each change nothing; and an email change cannot move the address
+     before a code sent to the new inbox has come back.
+   - **Reporting** — a report is stored pending and shows up in the queue and on
+     its detail page; a duplicate open report is refused; an owner cannot report
+     their own listing.
+   - **Moderation** — blocking stores the reason, resolves the open report and
+     records that the listing was blocked.
+   - **A blocked listing is gone** — the feed/catalogue query stops returning it,
+     no card is rendered for it, and it cannot be reported, saved, messaged
+     about or view-tracked; meanwhile its owner still sees it, is told it is
+     invisible and is shown the reason. Unblocking puts it straight back.
+   - **Two-factor** — with MFA on, a correct password still stops at the code
+     step and the half-finished session cannot reach the panel.
 
-Both exit non-zero on failure, so they work as a pre-commit or CI check. They
-create a temporary listing if the database has none, and remove it again
-afterwards.
+   Everything it creates is tagged with a per-run id and removed by a shutdown
+   handler, so an interrupted run cannot leave fixtures behind. Each delete is
+   attempted independently: an earlier version wrapped them in one `try`, and a
+   single failure (a table this schema does not have) stranded every fixture in
+   the live database, where the next run tripped over its own leftovers. If
+   cleanup ever does fail it now says so loudly and prints the SQL to fix it by
+   hand.
+
+All three exit non-zero on failure, so they work as a pre-commit or CI check.
+The first two create a temporary listing if the database has none, and remove it
+again afterwards.
 
 ---
 
@@ -413,10 +491,39 @@ these files sit in the web root):
 | File | Purpose |
 | ---- | ------- |
 | `setup_own.php` | Creates/resets `own.test@example.com` (password `Testpass1!`) with one listing, for testing owner-only screens. |
-| `_smtp_test.php` | Sends one real email and prints the whole SMTP conversation — fastest way to debug mail settings. |
+| `_smtp_test.php` | Sends one real email and prints the whole SMTP conversation —" fastest way to debug mail settings. |
+| `tools/create_admin.php` | Creates or resets a **superadmin** account. CLI-only. |
 
-There is also `dashboard_smoke_test.php` / `render_smoke_test.php` above, and
-`final_app.sql` for the schema.
+There is also `dashboard_smoke_test.php` / `render_smoke_test.php` /
+`admin_flow_test.php` above, and `final_app.sql` for the schema.
+
+### Creating the superadmin account
+
+There is no admin sign-up page, and there is not meant to be one: the only way
+in is from a shell on the server.
+
+```bash
+php tools/create_admin.php                              # prompts for both
+php tools/create_admin.php --email=you@example.com      # prompts for the password only
+ISLA_ADMIN_EMAIL=you@example.com ISLA_ADMIN_PASSWORD='...' php tools/create_admin.php
+php tools/create_admin.php --email=you@example.com --reset    # new password, same account
+```
+
+- The password is typed **blind** (terminal echo off) and never passed on the
+  command line unless you choose the env-var form, so it does not land in your
+  shell history. It is stored as a bcrypt hash.
+- The same password rules as a member account apply (8–64 characters, an
+  uppercase letter, a lowercase letter and one of `! @ -`), enforced by the
+  shared `isla_password_problem()` so the two can never drift apart.
+- Running it again for an existing address **resets** that account's password
+  and re-activates it — that is the recovery path if the admin loses the
+  password.
+- Two-factor email codes are **on** by default. After that, the admin can
+  change their email, password and two-factor setting from **Settings** in the
+  panel; nothing about the account is frozen after creation.
+
+`tools/` sits outside `public/`, so `create_admin.php` cannot be reached over
+the web even if the document root is misconfigured.
 
 ---
 
@@ -456,6 +563,27 @@ Implemented everywhere, not per page:
   submitter, one review per contract.
 - **Privacy** — profile phones are never rendered on public cards; contact
   details are shared inside a chat only after the provider accepts the request.
+- **Superadmin identity is not member identity.** `admins` is a separate table
+  with its own session key (`admin_id`), its own login branch, and its own
+  guard. A member session cannot reach `/admin/`, and an admin session cannot
+  be expressed as a `user_id` — so no member page can be talked into treating
+  an admin as a member.
+- **Admin pages are `noindex, nofollow`** and every moderation action is a POST
+  with a CSRF token, so a moderation queue never reaches a search index and a
+  decision cannot be triggered by a link or an `<img>`.
+- **Credential changes are proved, not assumed.** Changing the admin email
+  requires the current password *and* a code sent to the new address; toggling
+  two-factor requires a code sent to the current one; changing the password
+  requires the current password. Email-change and sign-in codes live in
+  separate session channels, so a code that arrived to sign in can never be
+  replayed to rewrite the account.
+- **A blocked listing is unreachable, not just unlisted.** It is filtered out of
+  every public read *and* every public write, so it cannot be saved, messaged
+  about, hired or view-tracked — while its owner keeps full control of it and
+  is told why.
+- **Reporting is rate-limited and one-at-a-time**: one open report per member
+  per listing, five an hour per member, a whitelisted reason list, and evidence
+  that is validated by type and size server-side.
 - **Secrets** — credentials live in `.env` only, and that file sits *outside*
   the document root, so it is unreachable over HTTP on any server whether or
   not that server honours `.htaccess`. `public/.htaccess` additionally denies
@@ -480,7 +608,9 @@ Deliberately **not** done yet:
 | ----- | ----- |
 | `users` | Accounts: names, unique email/phone, DOB (18+ check), password hash, avatar path, verification + MFA flags. |
 | `user_devices` | Trusted sessions shown in Device Logins (no FK, so the delete-account flow clears it by hand). |
-| `providers` | islaFIND listings: type, title, address, map pin, description or unit count, the listing's own picture (`profile_picture`, nullable — `NULL` means "use the owner's account avatar"), rating aggregates, view/interaction counts. |
+| `providers` | islaFIND listings: type, title, address, map pin, description or unit count, the listing's own picture (`profile_picture`, nullable — `NULL` means "use the owner's account avatar"), rating aggregates, view/interaction counts. Also `profile_code` (the `ISLA-000123` reference an admin uses to talk about a listing, unique, assigned on save) and `status` (`active` / `blocked`) with `blocked_at` + `blocked_reason`. Every public query filters `status = 'active'`; the owner's own panels deliberately do not. |
+| `profile_reports` | One row per listing report: which listing, who filed it, the `reason_code`, their note, an optional `evidence_image`, the state (`pending` / `resolved` / `dismissed`), the admin's note, whether the listing was blocked as a result, and who decided. One open report per member per listing is enforced by a partial unique index. |
+| `admins` | Superadmin accounts — deliberately NOT a kind of member: their own table, so no member query or member session can reach them. Unique email, bcrypt hash, display name, MFA flag, active flag, last login (time + IP). Rows are created from the server with `tools/create_admin.php`, never by a web form. |
 | `provider_album_images` | A business listing's extra photos: `provider_id`, the stored filename, its `sort_order`, and when it was added. Up to `ISLA_ALBUM_MAX_PHOTOS` (5) per listing, deleted with the listing by its foreign key. Created at runtime by `db.php` if missing. |
 | `conversations` | One thread per provider–client pair, with `pending` / `accepted` / `declined` request state. |
 | `messages` | Thread messages with a `kind` of `chat` or `system`, plus per-user and per-message soft-delete flags. |

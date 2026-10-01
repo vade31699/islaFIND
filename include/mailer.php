@@ -73,6 +73,39 @@ function sendMfaEmail(string $to, string $code): bool
     );
 }
 
+# Superadmin sign-in code e-mail (include/admin_auth.php). Same code
+# shape and the same "2 minutes" wording as the member MFA mail, because
+# it plays exactly the same role — the second factor on an admin login —
+# and the session-side TTL (ADMIN_CODE_TTL) is deliberately identical to
+# the member one. Changing one means changing the other.
+function sendAdminMfaEmail(string $to, string $code, string $subject = 'Your islaFIND admin sign-in code'): bool
+{
+    return sendCodeMail(
+        $to,
+        $code,
+        $subject,
+        'Use this code to finish signing in to the islaFIND superadmin panel:',
+        'This code expires in 2 minutes. If you did not try to sign in, someone may know your admin password — change it in Settings as soon as possible.'
+    );
+}
+
+# E-mail-CHANGE code (Privacy & Security -> Change email address).
+# Deliberately sent to the address being moved TO, not the one in force:
+# the point of the code is to prove the member can read mail where they
+# are asking the account to live. Nothing is written to the users row
+# until they do, so a typo can never strand someone who can no longer
+# receive their own sign-in code.
+function sendEmailChangeCode(string $to, string $code): bool
+{
+    return sendCodeMail(
+        $to,
+        $code,
+        'Confirm your new islaFIND email address',
+        'Confirm this email address for your islaFIND account with this code:',
+        'This code expires in 2 minutes. Your sign-in email only changes once you enter it. If you did not request this, ignore this e-mail and change your password.'
+    );
+}
+
 # Shared SMTP sender behind every one-time-code e-mail.
 function sendCodeMail(string $to, string $code, string $subject, string $intro, string $note): bool
 {

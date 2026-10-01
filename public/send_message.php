@@ -51,7 +51,7 @@ if ($providerId <= 0) {
     // profile_type is read too: the contract row below is only
     // created for INDIVIDUAL SKILLS listings — business listings are
     // inquired/chatted with but never enter the hire -> rating chain.
-    $stmt = $pdo->prepare('SELECT id, user_id, name, profile_type FROM providers WHERE id = :id LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, user_id, name, profile_type FROM providers WHERE id = :id AND status = \'active\' LIMIT 1');
     $stmt->execute([':id' => $providerId]);
     $provider = $stmt->fetch();
 

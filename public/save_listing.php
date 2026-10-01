@@ -155,7 +155,7 @@ if ($providerId <= 0) {
 }
 
 // --- 7. The listing must exist ---------------------------------
-$stmt = $pdo->prepare('SELECT id, user_id FROM providers WHERE id = :id LIMIT 1');
+  $stmt = $pdo->prepare('SELECT id, user_id FROM providers WHERE id = :id AND status = \'active\' LIMIT 1');
 $stmt->execute([':id' => $providerId]);
 $provider = $stmt->fetch();
 
