@@ -1,18 +1,12 @@
 <?php
-// ============================================================
-// admin/views/report.php — one report, and what can be done about it
+// admin/views/report.php — one report
 //
-// Required by admin/index.php, which has already run the guard and
-// built the data. Uses: $report, $listing, $reporter, $ownerOther,
-// $listingOther, e(), adm_upload_url(), adm_listing_title(),
-// adm_time_ago().
+// Uses: $report, $listing, $reporter, $ownerOther, $listingOther, e(),
+// adm_upload_url(), adm_listing_title(), adm_time_ago().
 //
-// The layout follows what the decision actually needs: the claim on
-// one side, the listing as members see it on the other, and the
-// actions underneath both — because "block this listing" is a
-// judgement about the listing, while "dismiss this report" is a
-// judgement about the claim.
-// ============================================================
+// The listing first, the claim beside it. The owner is a step away:
+// "Show owner profile" opens a separate screen listing everything the
+// account owns.
 
 if ($report === null) {
     ?>
@@ -28,28 +22,15 @@ if ($report === null) {
     <?php
     return;
 }
-?>
 
-<?php
 $providerId   = (int) $report['provider_id'];
 $reportId     = (int) $report['id'];
 $isPending    = (string) $report['status'] === 'pending';
-$listingState = (string) ($listing['status'] ?? 'active');
-$isBlocked    = $listingState === 'blocked';
-// The OTHER kind of block. A listing block hides the listing; an account
-// block closes the person behind it, which is what an admin reaches for
-// when the same owner keeps turning up in this queue. The two are
-// independent: an account can be blocked with every listing still
-// 'active' in the database, which is what lets unblocking put all of
-// them back at once.
-$ownerBlocked = $listing !== null
-             && (string) ($listing['owner_status'] ?? 'active') === 'blocked';
+$isBlocked    = (string) ($listing['status'] ?? 'active') === 'blocked';
+$ownerBlocked = $listing !== null && (string) ($listing['owner_status'] ?? 'active') === 'blocked';
 $reasonLabel  = isla_report_reason_label((string) $report['reason_code']);
 $evidence     = trim((string) ($report['evidence_image'] ?? ''));
 
-// The listing's own picture, falling back to the owner's account avatar —
-// the same resolution a member's card does, so the admin sees exactly the
-// picture members saw when they decided to report it.
 $pic = null;
 if ($listing !== null) {
     $resolved = isla_listing_photo_src(
@@ -60,97 +41,51 @@ if ($listing !== null) {
         $pic = adm_upload_url($resolved);
     }
 }
+
+// Open reports the owner has on their other listings.
+$ownerOpenElsewhere = 0;
+foreach ($ownerOther as $other) {
+    $ownerOpenElsewhere += (int) ($other['open_reports'] ?? 0);
+}
 ?>
 <div class="adm-panel">
     <div class="adm-panel-head">
         <div>
-            <h2>
-                <?php echo e($reasonLabel); ?>
-            </h2>
-            <p>
-                Report #<?php echo $reportId; ?> ·
-                filed <?php echo e(adm_time_ago((string) $report['created_at'])); ?> ·
-                <?php echo e((string) $report['created_at']); ?>
-            </p>
+            <h2><?php echo e($reasonLabel); ?></h2>
+            <p>Report #<?php echo $reportId; ?> · filed <?php echo e(adm_time_ago((string) $report['created_at'])); ?></p>
         </div>
         <div class="adm-panel-head-actions">
-            <?php if ((string) $report['status'] === 'pending'): ?>
-                <span class="adm-badge adm-badge-pending"><span class="adm-badge-dot"></span>Awaiting review</span>
+            <?php if ($isPending): ?>
+                <span class="adm-badge adm-badge-pending"><span class="adm-badge-dot"></span>Open</span>
             <?php elseif ((string) $report['status'] === 'resolved'): ?>
                 <span class="adm-badge adm-badge-resolved"><span class="adm-badge-dot"></span>Resolved</span>
             <?php else: ?>
                 <span class="adm-badge adm-badge-dismissed"><span class="adm-badge-dot"></span>Dismissed</span>
             <?php endif; ?>
-
             <?php if ($isBlocked): ?>
                 <span class="adm-badge adm-badge-blocked"><span class="adm-badge-dot"></span>Listing blocked</span>
             <?php endif; ?>
-
-            <a class="btn btn-small btn-outline" href="index.php?view=reports&amp;status=<?php echo e((string) $report['status']); ?>">Back</a>
+            <?php if ($ownerOpenElsewhere > 0): ?>
+                <span class="adm-badge adm-badge-flag">
+                    <span class="adm-badge-dot"></span>Owner: <?php echo $ownerOpenElsewhere; ?> open report<?php echo $ownerOpenElsewhere === 1 ? '' : 's'; ?> elsewhere
+                </span>
+            <?php endif; ?>
+            <?php if ($listing !== null): ?>
+                <a class="btn btn-small" href="index.php?view=owner&amp;id=<?php echo (int) ($listing['user_id'] ?? 0); ?>&amp;report_id=<?php echo $reportId; ?>">
+                    Show owner profile
+                </a>
+            <?php endif; ?>
         </div>
     </div>
 
     <div class="adm-panel-body">
         <div class="adm-detail">
 
-            <!-- ============ Left: the claim ============ -->
             <div class="adm-detail-col">
-                <h3 class="adm-subhead">What was reported</h3>
-
-                <dl class="adm-kv">
-                    <dt>Listing</dt>
-                    <dd><?php echo e(adm_listing_title($listing ?? $report)); ?></dd>
-
-                    <dt>IslaProfile ID</dt>
-                    <dd class="adm-ref"><?php echo e((string) ($report['profile_code'] ?: isla_profile_code($providerId))); ?></dd>
-
-                    <dt>Reported by</dt>
-                    <dd>
-                        <?php echo e((string) ($reporter['full_name'] ?? 'Member')); ?>
-                        <?php if ($reporter !== null): ?>
-                            <span class="adm-secondary">
-                                member since <?php echo e(date('j M Y', (int) strtotime((string) $reporter['created_at']))); ?>
-                            </span>
-                        <?php endif; ?>
-                    </dd>
-                </dl>
-
-                <?php if (trim((string) ($report['details'] ?? '')) !== ''): ?>
-                    <h3 class="adm-subhead is-spaced">In their words</h3>
-                    <!-- The member's text is quoted, never interpreted:
-                         it is printed as text with its own line breaks. -->
-                    <div class="adm-quote"><?php echo e((string) $report['details']); ?></div>
-                <?php endif; ?>
-
-                <?php if ($evidence !== ''): ?>
-                    <figure class="adm-evidence">
-                        <!-- The stored name is a bare filename produced by
-                             isla_upload_name(); adm_upload_url() runs it
-                             through basename() + rawurlencode(), so this can
-                             never point outside the uploads folder. -->
-                        <a href="<?php echo e(adm_upload_url($evidence)); ?>" target="_blank" rel="noopener noreferrer">
-                            <img src="<?php echo e(adm_upload_url($evidence)); ?>" alt="Evidence screenshot supplied with this report">
-                        </a>
-                        <figcaption>Evidence uploaded by the member — click to open full size.</figcaption>
-                    </figure>
-                <?php endif; ?>
-
-                <?php if ($reporter !== null): ?>
-                    <p class="adm-secondary adm-spaced">
-                        Reporter contact (for follow-up only):
-                        <?php echo e((string) $reporter['email']); ?>
-                    </p>
-                <?php endif; ?>
-            </div>
-
-            <!-- ============ Right: the listing ============ -->
-            <div class="adm-detail-col">
-                <h3 class="adm-subhead">The listing as members see it</h3>
+                <h3 class="adm-subhead">The reported listing</h3>
 
                 <?php if ($listing === null): ?>
-                    <div class="adm-empty is-inline">
-                        This listing has been deleted. The report was kept for the record.
-                    </div>
+                    <div class="adm-empty is-inline">This listing has been deleted.</div>
                 <?php else: ?>
                     <div class="adm-listing-head">
                         <?php if ($pic !== null): ?>
@@ -163,11 +98,10 @@ if ($listing !== null) {
                         <div>
                             <strong class="adm-listing-title"><?php echo e(adm_listing_title($listing)); ?></strong>
                             <span class="adm-secondary">
-                                Listed <?php echo e(adm_time_ago((string) $listing['created_at'])); ?>
-                                <?php $visits = (int) ($listing['view_count'] ?? 0); ?>
-                                · <?php echo $visits; ?> view<?php echo $visits === 1 ? '' : 's'; ?>
-                                <?php $reports = (int) ($listing['review_count'] ?? 0); ?>
-                                · <?php echo $reports; ?> rating<?php echo $reports === 1 ? '' : 's'; ?>
+                                <?php echo e((string) ($report['profile_code'] ?: isla_profile_code($providerId))); ?>
+                                · listed <?php echo e(adm_time_ago((string) $listing['created_at'])); ?>
+                                · <?php echo (int) ($listing['view_count'] ?? 0); ?> views
+                                · <?php echo (int) ($listing['review_count'] ?? 0); ?> ratings
                             </span>
                         </div>
                     </div>
@@ -176,33 +110,17 @@ if ($listing !== null) {
                         <dt>Owner</dt>
                         <dd><?php echo e((string) ($listing['owner_name'] ?? '—')); ?></dd>
 
-                        <dt>Contact</dt>
-                        <dd><?php echo e((string) ($listing['owner_email'] ?? '—')); ?></dd>
-
-                        <dt>Phone</dt>
-                        <dd><?php echo e((string) ($listing['owner_phone'] ?? '—')); ?></dd>
-
                         <dt>Account</dt>
                         <dd>
                             <?php if ($ownerBlocked): ?>
                                 <span class="adm-badge adm-badge-blocked"><span class="adm-badge-dot"></span>Blocked</span>
-                                <?php if (!empty($listing['owner_blocked_at'])): ?>
-                                    <span class="adm-secondary">
-                                        since <?php echo e(adm_time_ago((string) $listing['owner_blocked_at'])); ?>
-                                        <?php if (!empty($listing['owner_blocked_reason'])): ?>
-                                            — <?php echo e((string) $listing['owner_blocked_reason']); ?>
-                                        <?php endif; ?>
-                                    </span>
-                                <?php endif; ?>
                             <?php else: ?>
                                 <span class="adm-badge adm-badge-active"><span class="adm-badge-dot"></span>Live</span>
                             <?php endif; ?>
                         </dd>
 
                         <dt>Location</dt>
-                        <dd>
-                            <?php echo e(trim(((string) ($listing['barangay'] ?? '')) . ', ' . ((string) ($listing['municipality'] ?? '')), ', ')); ?>
-                        </dd>
+                        <dd><?php echo e(trim(((string) ($listing['barangay'] ?? '')) . ', ' . ((string) ($listing['municipality'] ?? '')), ', ')); ?></dd>
 
                         <dt>State</dt>
                         <dd>
@@ -230,9 +148,6 @@ if ($listing !== null) {
 
                 <?php if (!empty($listingOther)): ?>
                     <h3 class="adm-subhead is-spaced">Other reports on this listing</h3>
-                    <p class="adm-secondary adm-tight">
-                        <?php echo count($listingOther); ?> more — a pattern worth weighing.
-                    </p>
                     <?php foreach ($listingOther as $other): ?>
                         <p class="adm-secondary adm-stack">
                             <a href="index.php?view=report&amp;id=<?php echo (int) $other['id']; ?>">
@@ -243,58 +158,63 @@ if ($listing !== null) {
                         </p>
                     <?php endforeach; ?>
                 <?php endif; ?>
+            </div>
 
-                <?php if (!empty($ownerOther)): ?>
-                    <h3 class="adm-subhead is-spaced">Other listings by this owner</h3>
-                    <?php foreach ($ownerOther as $other): ?>
-                        <p class="adm-secondary adm-stack">
-                            <?php echo e(adm_listing_title($other)); ?>
-                            <span class="adm-ref"><?php echo e((string) ($other['profile_code'] ?: isla_profile_code((int) $other['id']))); ?></span>
-                            — <?php echo e((string) $other['status']); ?>
-                        </p>
-                    <?php endforeach; ?>
+            <div class="adm-detail-col">
+                <h3 class="adm-subhead">The report</h3>
+
+                <dl class="adm-kv">
+                    <dt>Reported by</dt>
+                    <dd>
+                        <?php echo e((string) ($reporter['full_name'] ?? 'Member')); ?>
+                        <?php if ($reporter !== null): ?>
+                            <span class="adm-secondary">member since <?php echo e(date('j M Y', (int) strtotime((string) $reporter['created_at']))); ?></span>
+                        <?php endif; ?>
+                    </dd>
+
+                    <dt>Contact</dt>
+                    <dd><?php echo e((string) ($reporter['email'] ?? '—')); ?></dd>
+                </dl>
+
+                <?php if (trim((string) ($report['details'] ?? '')) !== ''): ?>
+                    <h3 class="adm-subhead is-spaced">In their words</h3>
+                    <div class="adm-quote"><?php echo e((string) $report['details']); ?></div>
+                <?php endif; ?>
+
+                <?php if ($evidence !== ''): ?>
+                    <figure class="adm-evidence">
+                        <a href="<?php echo e(adm_upload_url($evidence)); ?>" target="_blank" rel="noopener noreferrer">
+                            <img src="<?php echo e(adm_upload_url($evidence)); ?>" alt="Evidence screenshot supplied with this report">
+                        </a>
+                        <figcaption>Evidence uploaded by the member.</figcaption>
+                    </figure>
                 <?php endif; ?>
             </div>
         </div>
     </div>
 </div>
 
-<!-- ============ Actions ============ -->
 <div class="adm-panel">
     <div class="adm-panel-head">
-        <div>
-            <h2>Decide</h2>
-            <p>
-                Blocking a listing hides that listing from every part of the app; the owner keeps it, and can see
-                that it is blocked. Blocking the account goes further — sign-in is refused, any session they have
-                open ends, and every listing they own leaves the app. It is the only one of the two that answers
-                the person rather than the page, so reach for it when the same owner keeps appearing here.
-            </p>
-        </div>
+        <h2>Decide</h2>
     </div>
 
     <div class="adm-panel-body">
-        <!-- Blocking. The reason is stored on the listing so the record
-             survives even if this report is later dismissed. -->
         <?php if ($listing !== null && !$isBlocked): ?>
         <form action="action.php" method="POST" class="adm-note-box"
               onsubmit="return confirm('Block this listing? It disappears from the feed, the catalogue and search immediately.');">
             <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
             <input type="hidden" name="do" value="block_listing">
             <input type="hidden" name="provider_id" value="<?php echo $providerId; ?>">
-
             <div class="form-group">
                 <label class="field-label" for="blockReason">Reason for blocking (stored on the listing)</label>
                 <input class="field-in" type="text" id="blockReason" name="reason"
                        maxlength="255" placeholder="<?php echo e($reasonLabel); ?>"
                        value="<?php echo e($reasonLabel); ?>">
             </div>
-
             <div class="adm-actions-row is-spaced">
                 <button type="submit" class="btn btn-danger btn-small">Block this listing</button>
-                <span class="adm-secondary">
-                    Resolves every open report on <?php echo e((string) ($report['profile_code'] ?: isla_profile_code($providerId))); ?>.
-                </span>
+                <span class="adm-secondary">Resolves every open report on it.</span>
             </div>
         </form>
         <?php elseif ($listing !== null && $isBlocked): ?>
@@ -310,52 +230,6 @@ if ($listing !== null) {
         </form>
         <?php endif; ?>
 
-        <!-- Blocking the owner's account. Offered next to the listing
-             block because that is the decision it competes with: hide
-             this one listing, or close the account behind it.
-             The reason is stored on the account and is the sentence the
-             owner reads on the sign-in screen, so it is written as one. -->
-        <?php if ($listing !== null && !$ownerBlocked): ?>
-        <form action="action.php" method="POST" class="adm-note-box"
-              onsubmit="return confirm('Block this owner\'s account? They will be signed out, unable to sign in again, and every listing they own disappears from the app.');">
-            <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
-            <input type="hidden" name="do" value="block_account">
-            <input type="hidden" name="owner_id" value="<?php echo (int) ($listing['user_id'] ?? 0); ?>">
-            <input type="hidden" name="report_id" value="<?php echo $reportId; ?>">
-
-            <div class="form-group">
-                <label class="field-label" for="blockAccountReason">Reason for blocking the account (shown to the owner when they try to sign in)</label>
-                <input class="field-in" type="text" id="blockAccountReason" name="reason"
-                       maxlength="255" placeholder="<?php echo e($reasonLabel); ?>"
-                       value="<?php echo e($reasonLabel); ?>">
-            </div>
-
-            <div class="adm-actions-row is-spaced">
-                <button type="submit" class="btn btn-danger btn-small">Block the owner's account</button>
-                <span class="adm-secondary">
-                    Hides every listing they own, signs them out and refuses the next sign-in.
-                    Nothing is deleted — unblocking brings all of it back.
-                </span>
-            </div>
-        </form>
-        <?php elseif ($listing !== null && $ownerBlocked): ?>
-        <form action="action.php" method="POST"
-              onsubmit="return confirm('Restore this account? They will be able to sign in again, and their listings return to the app.');">
-            <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
-            <input type="hidden" name="do" value="unblock_account">
-            <input type="hidden" name="owner_id" value="<?php echo (int) ($listing['user_id'] ?? 0); ?>">
-            <input type="hidden" name="report_id" value="<?php echo $reportId; ?>">
-            <div class="adm-actions-row">
-                <button type="submit" class="btn btn-small">Unblock this account</button>
-                <span class="adm-secondary">
-                    Their listings are live again and the reason on the account is cleared.
-                    Reports already resolved by the block stay resolved.
-                </span>
-            </div>
-        </form>
-        <?php endif; ?>
-
-        <!-- The report's own outcome + the note that explains it. -->
         <form action="action.php" method="POST" class="adm-form-block">
             <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
             <input type="hidden" name="do" value="<?php echo $isPending ? 'resolve_report' : 'save_note'; ?>">

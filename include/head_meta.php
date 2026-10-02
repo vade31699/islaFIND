@@ -63,3 +63,4 @@ $headDescEsc  = htmlspecialchars($headDesc, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'
 
     <link rel="stylesheet" href="<?php echo asset_url('style.css'); ?>">
     <script src="<?php echo asset_url('busy.js'); ?>"></script>
+    <script src="<?php echo asset_url('back_swipe.js'); ?>"></script>

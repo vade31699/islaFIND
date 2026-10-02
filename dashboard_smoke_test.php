@@ -531,7 +531,7 @@ check(
     'dashboard.php offers the delete-account flow',
     strpos($dashboard, 'delete_account') !== false && strpos($dashboard, 'danger-zone') !== false
 );
-foreach (['setup_own.php', '_smtp_test.php', 'dashboard_smoke_test.php', 'render_smoke_test.php'] as $dev) {
+foreach (['setup_own.php', '_smtp_test.php', 'dashboard_smoke_test.php', 'render_smoke_test.php', 'responsive_smoke_test.php'] as $dev) {
     $src = is_file($root . '/' . $dev) ? (string) file_get_contents($root . '/' . $dev) : '';
     check(
         "$dev is command-line only",

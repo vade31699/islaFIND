@@ -2,8 +2,14 @@
 // ============================================================
 // admin/settings.php — the superadmin's own credentials
 //
-// Three things can be changed here, and each one is gated on proof
-// that the person at the keyboard is really the admin:
+// Settings is a HUB, not a page of stacked forms: clicking Settings
+// lists the things that can be changed, and each one opens on its own
+// screen (?section=email|password|mfa|account). One decision at a
+// time — a pending emailed-code form is not competing with two other
+// panels for attention.
+//
+// Each change is gated on proof that the person at the keyboard is
+// really the admin:
 //
 //   1. Email address — current password, then a code sent to the NEW
 //      address. Proving you can read the new inbox is what stops a
@@ -38,47 +44,63 @@ require_once __DIR__ . '/../../include/admin_auth.php';
 // --- 2. The guard. Nothing below runs unless this returns. -----
 $admin = admin_require_login($pdo);
 
-// --- 3. Messages ------------------------------------------------
+// --- 3. Which section, if any ----------------------------------
+// The overview is the empty value; everything else is one of the
+// sections below. Whitelisted, so the query string can only ever
+// select a screen that exists.
+$sections = ['email', 'password', 'mfa', 'account'];
+
+$section = (string) ($_GET['section'] ?? '');
+if (!in_array($section, $sections, true)) {
+    $section = '';
+}
+
+// --- 4. Messages ------------------------------------------------
 $flash = $_SESSION['admin_flash'] ?? null;
 unset($_SESSION['admin_flash']);
 
-// Per-form errors, so a failed password change does not blank the
-// email form (and vice versa). One bucket each, keyed by form name.
+// Per-section errors, so a failed password change does not blank the
+// email form (and vice versa). One bucket each, keyed by section.
 $errors = [
-    'email'  => $_SESSION['admin_err_email']  ?? '',
-    'mfa'    => $_SESSION['admin_err_mfa']    ?? '',
-    'notice' => $_SESSION['admin_err_notice'] ?? '',
+    'email'    => $_SESSION['admin_err_email']    ?? '',
+    'password' => $_SESSION['admin_err_password'] ?? '',
+    'mfa'      => $_SESSION['admin_err_mfa']      ?? '',
 ];
-unset($_SESSION['admin_err_email'], $_SESSION['admin_err_mfa'], $_SESSION['admin_err_notice']);
+unset($_SESSION['admin_err_email'], $_SESSION['admin_err_password'], $_SESSION['admin_err_mfa']);
 
-function settings_fail(string $form, string $message): void
+/** Back to the section that failed, with its own error message. */
+function settings_fail(string $section, string $message): void
 {
-    $key = 'admin_err_' . $form;
-    $_SESSION[$key] = $message;
-    header('Location: settings.php#' . $form);
+    $_SESSION['admin_err_' . $section] = $message;
+    header('Location: settings.php?section=' . $section);
     exit;
 }
 
-function settings_done(string $message): void
+/**
+ * A finished change. $to is where to land: the hub for anything that
+ * is now done, or a section when the work continues there (the
+ * emailed-code step).
+ */
+function settings_done(string $message, string $to = ''): void
 {
     $_SESSION['admin_flash'] = ['type' => 'success', 'msg' => $message];
-    header('Location: settings.php');
+    header('Location: settings.php' . ($to !== '' ? '?section=' . $to : ''));
     exit;
 }
 
-// --- 4. The three changes --------------------------------------
+// --- 5. The changes ---------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // CSRF first: without a valid token nothing below is even read, so
     // a cross-site form post cannot start an email change.
     if (!csrf_check()) {
-        settings_fail('notice', 'Your session expired. Please try again.');
+        settings_done('Your session expired. Please try again.');
     }
 
     $do = (string) ($_POST['do'] ?? '');
 
     // ============================================================
-    // 4a. START an email change — sends the code to the new address
+    // 5a. START an email change — sends the code to the new address
     // ============================================================
     if ($do === 'start_email_change') {
         $currentPassword = (string) ($_POST['current_password'] ?? '');
@@ -118,17 +140,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         admin_begin_settings_change($newEmail, 'email', ['new_email' => $newEmail]);
 
         $pending = admin_settings_change_pending('email');
-        $sent    = (bool) ($pending['emailed'] ?? false);
-
-        if (!$sent) {
+        if (!(bool) ($pending['emailed'] ?? false)) {
             settings_fail('email', 'We could not send the code to that address. Check it and try again.');
         }
 
-        settings_done('A code is on its way to ' . $newEmail . '. Enter it below to finish.');
+        settings_done('A code is on its way to ' . $newEmail . '. Enter it below to finish.', 'email');
     }
 
     // ============================================================
-    // 4b. CONFIRM the email change with the emailed code
+    // 5b. CONFIRM the email change with the emailed code
     // ============================================================
     if ($do === 'confirm_email_change') {
         $code = trim((string) ($_POST['code'] ?? ''));
@@ -158,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // ============================================================
-    // 4c. Change the password
+    // 5c. Change the password
     // ============================================================
     if ($do === 'change_password') {
         $currentPassword = (string) ($_POST['current_password'] ?? '');
@@ -167,22 +187,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $account = admin_account($pdo, (string) $admin['email']);
         if ($account === null || !admin_verify_password($account, $currentPassword)) {
-            settings_fail('notice', 'Your current password is not correct.');
+            settings_fail('password', 'Your current password is not correct.');
         }
 
         if ($newPassword !== $confirmPassword) {
-            settings_fail('notice', 'The two new passwords do not match.');
+            settings_fail('password', 'The two new passwords do not match.');
         }
 
         // Refuse a "change" that changes nothing: it would read as
         // success while leaving the old password in place.
         if (admin_verify_password($account, $newPassword)) {
-            settings_fail('notice', 'That is already your current password.');
+            settings_fail('password', 'That is already your current password.');
         }
 
         $problem = isla_password_problem($newPassword);
         if ($problem !== null) {
-            settings_fail('notice', $problem);
+            settings_fail('password', $problem);
         }
 
         $stmt = $pdo->prepare(
@@ -201,7 +221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // ============================================================
-    // 4d. START an MFA change — code to the CURRENT address
+    // 5d. START an MFA change — code to the CURRENT address
     // ============================================================
     if ($do === 'start_mfa_change') {
         $account = admin_account($pdo, (string) $admin['email']);
@@ -216,11 +236,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             settings_fail('mfa', 'We could not send a code to your admin email. Check it and try again.');
         }
 
-        settings_done('A code is on its way to ' . $admin['email'] . '. Enter it below to finish.');
+        settings_done('A code is on its way to ' . $admin['email'] . '. Enter it below to finish.', 'mfa');
     }
 
     // ============================================================
-    // 4e. CONFIRM the MFA change
+    // 5e. CONFIRM the MFA change
     // ============================================================
     if ($do === 'confirm_mfa_change') {
         $code = trim((string) ($_POST['code'] ?? ''));
@@ -242,15 +262,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Anything unrecognised: refuse rather than guess.
-    settings_fail('notice', 'Unknown action.');
+    settings_done('Unknown action.');
 }
 
-// --- 5. What the page needs to render --------------------------
-$emailPending  = admin_settings_change_pending('email');
-$mfaPending    = admin_settings_change_pending('mfa');
-$mfaEnabled    = (int) $admin['mfa_enabled'] === 1;
-$pageTitle     = 'Settings';
-$pageSubtitle  = 'Your admin email, password and sign-in security.';
+// --- 6. What the page needs to render --------------------------
+$emailPending = admin_settings_change_pending('email');
+$mfaPending   = admin_settings_change_pending('mfa');
+$mfaEnabled   = (int) $admin['mfa_enabled'] === 1;
+
+// One place where each section describes itself, so the hub and the
+// section screen can never drift apart. `status` is the one line the
+// hub shows next to the label, so the list is informative at a glance
+// rather than three identical rows.
+$sectionMeta = [
+    'email' => [
+        'label'  => 'Email address',
+        'blurb'  => 'The address you sign in with, and where every verification code goes.',
+        'status' => (string) $admin['email'],
+        'icon'   => '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7.5l9 6 9-6"/>',
+    ],
+    'password' => [
+        'label'  => 'Password',
+        'blurb'  => 'Change the password on this admin account. Takes effect immediately.',
+        'status' => 'Last changed on this page or from the server tool',
+        'icon'   => '<rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    ],
+    'mfa' => [
+        'label'  => 'Two-factor sign-in',
+        'blurb'  => 'After your password, we email a 6-digit code before you are let in.',
+        'status' => $mfaEnabled ? 'On' : 'Off',
+        'icon'   => '<path d="M12 3l7 3v6c0 4.5-3 8-7 8s-7-3.5-7-8V6z"/><path d="M9.5 12.5l1.8 1.8 3.4-3.8"/>',
+    ],
+    'account' => [
+        'label'  => 'Creating or resetting this account',
+        'blurb'  => 'There is no self-service admin signup, by design. Accounts are made from a shell.',
+        'status' => 'Server tool',
+        'icon'   => '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/>',
+    ],
+];
+
+// A pending emailed code is unfinished work, so the hub says so and
+// the section carries the form that finishes it.
+$pendingSection = null;
+if ($emailPending !== null) {
+    $pendingSection = 'email';
+} elseif ($mfaPending !== null) {
+    $pendingSection = 'mfa';
+}
+
+// --- 7. Page furniture -----------------------------------------
+$sectionLabel  = $section !== '' ? $sectionMeta[$section]['label'] : '';
+
+$pageTitle    = $section === '' ? 'Settings' : $sectionLabel;
+$pageSubtitle = $section === ''
+    ? 'Your admin email, password and sign-in security.'
+    : $sectionMeta[$section]['blurb'];
+
+// Where the header's Back button goes: a section returns to the hub.
+$backHref = 'index.php';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -315,7 +384,7 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                         <span class="adm-nav-go" aria-hidden="true">&#8250;</span>
                     </a>
                     <a class="adm-nav-link is-active" href="settings.php">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A2.65 2.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A2.65 2.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A2.65 2.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a2.65 2.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.61.77 1.02 1.41 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                         <span class="adm-nav-label">Settings</span>
                         <span class="adm-nav-go" aria-hidden="true">&#8250;</span>
                     </a>
@@ -341,6 +410,10 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
     <!-- ============ Main ============ -->
     <main class="adm-main">
         <header class="adm-top">
+            <a class="adm-back" href="<?php echo e($backHref); ?>">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+                Back
+            </a>
             <div>
                 <h1><?php echo e($pageTitle); ?></h1>
                 <p><?php echo e($pageSubtitle); ?></p>
@@ -355,24 +428,53 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                 </div>
             <?php endif; ?>
 
-            <!-- ---------- Current sign-in email ---------- -->
-            <section class="adm-panel">
+            <?php if ($section === ''): ?>
+            <!-- ============ The hub ============ -->
+            <div class="adm-panel">
                 <div class="adm-panel-head">
-                    <h2>Sign-in email</h2>
-                    <p>Where your verification codes go.</p>
+                    <div>
+                        <h2>Account security</h2>
+                        <p>Pick what you want to change. Each one opens on its own screen.</p>
+                    </div>
                 </div>
-                <div class="adm-panel-body">
-                    <p class="adm-secondary"><strong><?php echo e($admin['email']); ?></strong></p>
-                </div>
-            </section>
 
-            <!-- ---------- Change email ---------- -->
-            <section class="adm-panel" id="email">
+                <div class="adm-option-list">
+                    <?php foreach ($sectionMeta as $key => $meta): ?>
+                        <a class="adm-option" href="settings.php?section=<?php echo e($key); ?>">
+                            <span class="adm-option-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><?php echo $meta['icon']; ?></svg>
+                            </span>
+                            <span class="adm-option-text">
+                                <strong><?php echo e($meta['label']); ?></strong>
+                                <span><?php echo e($meta['blurb']); ?></span>
+                            </span>
+                            <span class="adm-option-meta">
+                                <?php if ($key === $pendingSection): ?>
+                                    <span class="adm-badge adm-badge-pending"><span class="adm-badge-dot"></span>Code pending</span>
+                                <?php else: ?>
+                                    <span class="adm-option-status"><?php echo e($meta['status']); ?></span>
+                                <?php endif; ?>
+                                <span class="adm-option-go" aria-hidden="true">&#8250;</span>
+                            </span>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <?php elseif ($section === 'email'): ?>
+            <!-- ============ Email address ============ -->
+            <div class="adm-panel">
                 <div class="adm-panel-head">
-                    <h2>Change email address</h2>
-                    <p>We send a code to the new address before anything moves, so a typo cannot lock you out.</p>
+                    <div>
+                        <h2>Email address</h2>
+                        <p>We send a code to the new address before anything moves, so a typo cannot lock you out.</p>
+                    </div>
                 </div>
                 <div class="adm-panel-body">
+                    <p class="adm-secondary">
+                        Currently signing in as <strong><?php echo e($admin['email']); ?></strong>
+                    </p>
+
                     <?php if ($errors['email'] !== ''): ?>
                         <div class="alert alert-error" role="alert"><?php echo e($errors['email']); ?></div>
                     <?php endif; ?>
@@ -394,7 +496,7 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                             </div>
                             <div class="adm-actions-row">
                                 <button type="submit" class="btn">Confirm new email</button>
-                                <a class="btn btn-outline" href="settings.php#email">Cancel</a>
+                                <a class="btn btn-outline" href="settings.php?section=email">Cancel</a>
                             </div>
                         </form>
                     <?php else: ?>
@@ -403,16 +505,16 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                             <input type="hidden" name="do" value="start_email_change">
 
                             <div class="field">
-                            <label class="field-label" for="current_password_email">Current password</label>
-                            <input class="field-in" type="password" id="current_password_email"
-                                   name="current_password" autocomplete="current-password" required>
-                        </div>
+                                <label class="field-label" for="current_password_email">Current password</label>
+                                <input class="field-in" type="password" id="current_password_email"
+                                       name="current_password" autocomplete="current-password" required>
+                            </div>
 
                             <div class="field">
-                            <label class="field-label" for="new_email">New email address</label>
-                            <input class="field-in" type="email" id="new_email" name="new_email"
-                                   autocomplete="email" required>
-                        </div>
+                                <label class="field-label" for="new_email">New email address</label>
+                                <input class="field-in" type="email" id="new_email" name="new_email"
+                                       autocomplete="email" required>
+                            </div>
 
                             <div class="adm-actions-row">
                                 <button type="submit" class="btn">Send code to new address</button>
@@ -420,17 +522,20 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                         </form>
                     <?php endif; ?>
                 </div>
-            </section>
+            </div>
 
-            <!-- ---------- Change password ---------- -->
-            <section class="adm-panel" id="password">
+            <?php elseif ($section === 'password'): ?>
+            <!-- ============ Password ============ -->
+            <div class="adm-panel">
                 <div class="adm-panel-head">
-                    <h2>Change password</h2>
-                    <p>At least 8 characters, with an uppercase letter, a lowercase letter and one of ! @ -.</p>
+                    <div>
+                        <h2>Password</h2>
+                        <p>At least 8 characters, with an uppercase letter, a lowercase letter and one of ! @ -.</p>
+                    </div>
                 </div>
                 <div class="adm-panel-body">
-                    <?php if ($errors['notice'] !== ''): ?>
-                        <div class="alert alert-error" role="alert"><?php echo e($errors['notice']); ?></div>
+                    <?php if ($errors['password'] !== ''): ?>
+                        <div class="alert alert-error" role="alert"><?php echo e($errors['password']); ?></div>
                     <?php endif; ?>
 
                     <form method="POST" class="adm-form">
@@ -460,21 +565,31 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                         </div>
                     </form>
                 </div>
-            </section>
+            </div>
 
-            <!-- ---------- Two-factor ---------- -->
-            <section class="adm-panel" id="mfa">
+            <?php elseif ($section === 'mfa'): ?>
+            <!-- ============ Two-factor ============ -->
+            <div class="adm-panel">
                 <div class="adm-panel-head">
-                    <h2>Two-factor sign-in</h2>
-                    <p>
+                    <div>
+                        <h2>Two-factor sign-in</h2>
+                        <p>
+                            <?php if ($mfaEnabled): ?>
+                                <strong>On.</strong> After your password, we email a 6-digit code to
+                                <?php echo e($admin['email']); ?>.
+                            <?php else: ?>
+                                <strong>Off.</strong> Your password alone signs you in. Turning this on is
+                                strongly recommended.
+                            <?php endif; ?>
+                        </p>
+                    </div>
+                    <div class="adm-panel-head-actions">
                         <?php if ($mfaEnabled): ?>
-                            <strong>On.</strong> After your password, we email a 6-digit code to
-                            <?php echo e($admin['email']); ?>.
+                            <span class="adm-badge adm-badge-active"><span class="adm-badge-dot"></span>On</span>
                         <?php else: ?>
-                            <strong>Off.</strong> Your password alone signs you in. Turning this on is
-                            strongly recommended.
+                            <span class="adm-badge adm-badge-dismissed"><span class="adm-badge-dot"></span>Off</span>
                         <?php endif; ?>
-                    </p>
+                    </div>
                 </div>
                 <div class="adm-panel-body">
                     <?php if ($errors['mfa'] !== ''): ?>
@@ -493,14 +608,14 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                                 It expires in 2 minutes.
                             </p>
                             <div class="field">
-                            <label class="field-label" for="mfa_code">Verification code</label>
-                            <input class="field-in adm-code" type="text" id="mfa_code" name="code"
-                                   inputmode="numeric" autocomplete="one-time-code" maxlength="6"
-                                   pattern="[0-9]{6}" placeholder="000000" required>
-                        </div>
+                                <label class="field-label" for="mfa_code">Verification code</label>
+                                <input class="field-in adm-code" type="text" id="mfa_code" name="code"
+                                       inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+                                       pattern="[0-9]{6}" placeholder="000000" required>
+                            </div>
                             <div class="adm-actions-row">
                                 <button type="submit" class="btn">Confirm change</button>
-                                <a class="btn btn-outline" href="settings.php#mfa">Cancel</a>
+                                <a class="btn btn-outline" href="settings.php?section=mfa">Cancel</a>
                             </div>
                         </form>
                     <?php else: ?>
@@ -509,26 +624,29 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                             <input type="hidden" name="do" value="start_mfa_change">
 
                             <div class="field">
-                            <label class="field-label" for="current_password_mfa">Current password</label>
-                            <input class="field-in" type="password" id="current_password_mfa"
-                                   name="current_password" autocomplete="current-password" required>
-                        </div>
+                                <label class="field-label" for="current_password_mfa">Current password</label>
+                                <input class="field-in" type="password" id="current_password_mfa"
+                                       name="current_password" autocomplete="current-password" required>
+                            </div>
 
                             <div class="adm-actions-row">
-                                <button type="submit" class="btn">
+                                <button type="submit" class="btn<?php echo $mfaEnabled ? ' btn-danger' : ''; ?>">
                                     <?php echo $mfaEnabled ? 'Turn two-factor OFF' : 'Turn two-factor ON'; ?>
                                 </button>
                             </div>
                         </form>
                     <?php endif; ?>
                 </div>
-            </section>
+            </div>
 
-            <!-- ---------- How the account is created ---------- -->
-            <section class="adm-panel">
+            <?php else: ?>
+            <!-- ============ Creating / resetting the account ============ -->
+            <div class="adm-panel">
                 <div class="adm-panel-head">
-                    <h2>Creating or resetting this account</h2>
-                    <p>There is no self-service admin signup, by design.</p>
+                    <div>
+                        <h2>Creating or resetting this account</h2>
+                        <p>There is no self-service admin signup, by design.</p>
+                    </div>
                 </div>
                 <div class="adm-panel-body">
                     <p class="adm-secondary">
@@ -539,10 +657,11 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                     <p class="adm-secondary">
                         Run the same command with <strong>--reset</strong> to set a new password from the
                         command line. Everything on this page works afterwards: change the email here, and
-                        change the password from the tool or from the form above.
+                        change the password from the tool or from the Password screen.
                     </p>
                 </div>
-            </section>
+            </div>
+            <?php endif; ?>
 
         </div>
     </main>

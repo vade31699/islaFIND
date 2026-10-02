@@ -410,17 +410,51 @@ $r = req('/admin/index.php', $adminJar);
 check('the admin panel opens for the admin', $r['status'] === 200 && strpos($r['body'], 'Superadmin') !== false,
     'status ' . $r['status']);
 
+// Settings is a HUB: the landing page lists the choices and links on
+// to a section, and each section is its own screen. Assert that shape,
+// then open each section — the token for the POSTs below comes from the
+// Password screen, which is where the change-password form lives.
 $r = req('/admin/settings.php', $adminJar);
-check('admin settings renders', $r['status'] === 200
-    && strpos($r['body'], 'Change email address') !== false
-    && strpos($r['body'], 'Change password') !== false
+check('admin settings renders the option hub', $r['status'] === 200
+    && strpos($r['body'], 'Account security') !== false
+    && strpos($r['body'], 'Email address') !== false
+    && strpos($r['body'], 'Password') !== false
     && strpos($r['body'], 'Two-factor') !== false,
     'status ' . $r['status']);
+check('the settings hub links on to each section',
+    strpos($r['body'], 'settings.php?section=email') !== false
+        && strpos($r['body'], 'settings.php?section=password') !== false
+        && strpos($r['body'], 'settings.php?section=mfa') !== false);
+check('the settings hub does not carry the change forms',
+    preg_match('/type="password"/', $r['body']) === 0);
 check('admin settings shows the admin\'s own email', strpos($r['body'], $adminEmail) !== false);
-check('admin settings never renders a password field value',
-    preg_match('/type="password"[^>]*value="[^"]+"/', $r['body']) === 0);
 
-$settingsCsrf = csrf_of($r['body']);
+$rEmail = req('/admin/settings.php?section=email', $adminJar);
+check('the email section opens on its own screen', $rEmail['status'] === 200
+    && strpos($rEmail['body'], 'Change email address') === false
+    && strpos($rEmail['body'], 'name="new_email"') !== false,
+    'status ' . $rEmail['status']);
+
+$rMfa = req('/admin/settings.php?section=mfa', $adminJar);
+check('the two-factor section opens on its own screen', $rMfa['status'] === 200
+    && strpos($rMfa['body'], 'name="current_password"') !== false
+    && strpos($rMfa['body'], 'name="new_email"') === false,
+    'status ' . $rMfa['status']);
+
+// An unknown section falls back to the hub rather than erroring.
+$rBogus = req('/admin/settings.php?section=nope', $adminJar);
+check('an unknown settings section falls back to the hub',
+    $rBogus['status'] === 200 && strpos($rBogus['body'], 'Account security') !== false,
+    'status ' . $rBogus['status']);
+
+$rPassword = req('/admin/settings.php?section=password', $adminJar);
+check('the password section opens on its own screen', $rPassword['status'] === 200
+    && strpos($rPassword['body'], 'name="new_password"') !== false,
+    'status ' . $rPassword['status']);
+check('admin settings never renders a password field value',
+    preg_match('/type="password"[^>]*value="[^"]+"/', $rPassword['body']) === 0);
+
+$settingsCsrf = csrf_of($rPassword['body']);
 
 // --- CSRF is refused -----------------------------------------
 $hashBefore = (string) $pdo->query("SELECT password_hash FROM admins WHERE id = " . $adminId)->fetchColumn();
@@ -497,7 +531,7 @@ $emailNow = (string) $pdo->query('SELECT email FROM admins WHERE id = ' . $admin
 check('the admin email only moves once a code is confirmed', $emailNow === $adminEmail,
     'email is now ' . $emailNow);
 check('starting an email change ends safely',
-    $emailStart['status'] === 302 || strpos($emailStart['body'], 'Sign-in email') !== false,
+    $emailStart['status'] === 302 || strpos($emailStart['body'], 'Email address') !== false,
     'status ' . $emailStart['status']);
 check('the email change page never fataled',
     stripos($emailStart['body'], 'Fatal error') === false

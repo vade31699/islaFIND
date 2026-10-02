@@ -8,8 +8,8 @@
 //
 //   do=block_listing   provider_id, reason
 //   do=unblock_listing provider_id
-//   do=block_account   owner_id, reason, report_id (to come back to)
-//   do=unblock_account owner_id, report_id
+//   do=block_account   owner_id, reason, report_id, return=owner (optional)
+//   do=unblock_account owner_id, report_id, return=owner (optional)
 //   do=resolve_report  report_id, outcome=resolved, notes
 //   do=dismiss_report  report_id, outcome=dismissed, notes
 //   do=save_note       report_id, notes
@@ -243,14 +243,21 @@ if ($action === 'block_account') {
     ]);
     $closed = $stmt->rowCount();
 
-    // Back to the report the admin was reading, where the account's new
-    // state is on screen — falling back to the queue when the action was
-    // fired from somewhere without one.
+    // Back to wherever the decision was made: the owner profile screen
+    // when the block came from there, otherwise the report.
+    $returnTo = $reportId > 0
+        ? 'index.php?view=report&id=' . $reportId
+        : 'index.php?view=reports&status=pending';
+    if ((string) ($_POST['return'] ?? '') === 'owner' && $ownerId > 0) {
+        $returnTo = 'index.php?view=owner&id=' . $ownerId
+                  . ($reportId > 0 ? '&report_id=' . $reportId : '');
+    }
+
     adm_redirect(
         'success',
         'Account blocked: sign-in refused, session ended, and every listing it owns is hidden.'
         . ($closed > 0 ? ' ' . $closed . ' open report(s) resolved.' : ''),
-        $reportId > 0 ? 'index.php?view=report&id=' . $reportId : 'index.php?view=reports&status=pending'
+        $returnTo
     );
 }
 
@@ -279,10 +286,18 @@ if ($action === 'unblock_account') {
     // Nothing else to undo: the listings were never touched. Reports
     // resolved by the block stay resolved — reopening the queue is a
     // second decision, not a side effect of this one.
+    $returnTo = $reportId > 0
+        ? 'index.php?view=report&id=' . $reportId
+        : 'index.php?view=reports&status=pending';
+    if ((string) ($_POST['return'] ?? '') === 'owner' && $ownerId > 0) {
+        $returnTo = 'index.php?view=owner&id=' . $ownerId
+                  . ($reportId > 0 ? '&report_id=' . $reportId : '');
+    }
+
     adm_redirect(
         'success',
         'Account restored. Its listings are live again, and the owner can sign in.',
-        $reportId > 0 ? 'index.php?view=report&id=' . $reportId : 'index.php?view=reports&status=pending'
+        $returnTo
     );
 }
 

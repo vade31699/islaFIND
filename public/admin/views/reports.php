@@ -1,11 +1,7 @@
 <?php
-// ============================================================
 // admin/views/reports.php — the moderation queue
-//
-// Required by admin/index.php, which has already run the guard and
-// built the data. Uses: $queue, $queueCounts, $statusFilter,
-// e(), adm_listing_title(), adm_time_ago().
-// ============================================================
+// Uses: $queue, $queueCounts, $statusFilter, $providerFilter,
+// $queueListing, e(), adm_listing_title(), adm_time_ago().
 
 $tabs = [
     'pending'   => 'Awaiting review',
@@ -13,13 +9,15 @@ $tabs = [
     'dismissed' => 'Dismissed',
     'all'       => 'All',
 ];
+
+$providerQuery = $providerFilter > 0 ? '&amp;provider=' . (int) $providerFilter : '';
 ?>
 <div class="adm-panel">
     <div class="adm-panel-head">
         <div class="adm-tabs">
             <?php foreach ($tabs as $key => $label): ?>
                 <a class="adm-tab<?php echo $statusFilter === $key ? ' is-active' : ''; ?>"
-                   href="index.php?view=reports&amp;status=<?php echo e($key); ?>">
+                   href="index.php?view=reports&amp;status=<?php echo e($key); ?><?php echo $providerQuery; ?>">
                     <?php echo e($label); ?>
                     <span class="adm-tab-n">
                         <?php echo $key === 'all' ? array_sum($queueCounts) : (int) $queueCounts[$key]; ?>
@@ -28,6 +26,12 @@ $tabs = [
             <?php endforeach; ?>
         </div>
         <div class="adm-panel-head-actions">
+            <?php if ($queueListing !== null): ?>
+                <span class="adm-secondary is-flat">
+                    Only <?php echo e(adm_listing_title($queueListing)); ?>
+                    <a href="index.php?view=reports&amp;status=<?php echo e($statusFilter); ?>">Clear</a>
+                </span>
+            <?php endif; ?>
             <span class="adm-secondary is-flat">Newest first &middot; <?php echo count($queue); ?> shown</span>
         </div>
     </div>
@@ -35,14 +39,19 @@ $tabs = [
     <?php if (empty($queue)): ?>
         <div class="adm-empty">
             <strong>No reports here.</strong>
-            <?php echo $statusFilter === 'pending'
-                ? 'Nothing is waiting on a decision right now.'
-                : 'Nothing has been filed under this filter.'; ?>
+            <?php if ($queueListing !== null): ?>
+                Nothing has been filed against this listing under this filter.
+                <a href="index.php?view=reports&amp;status=<?php echo e($statusFilter); ?>">Show the whole queue</a>.
+            <?php else: ?>
+                <?php echo $statusFilter === 'pending'
+                    ? 'Nothing is waiting on a decision right now.'
+                    : 'Nothing has been filed under this filter.'; ?>
+            <?php endif; ?>
         </div>
     <?php else: ?>
         <div class="adm-panel-body is-flush">
             <div class="adm-table-wrap">
-                <table class="adm-table">
+                <table class="adm-table is-queue">
                     <thead>
                         <tr>
                             <th scope="col">Listing</th>
@@ -57,10 +66,6 @@ $tabs = [
                     </thead>
                     <tbody>
                     <?php
-                    // Anything still open after a day gets the urgent accent.
-                    // The threshold lives here rather than in SQL so it is one
-                    // number in one place and readable next to the row it
-                    // colours.
                     $urgentCutoff = time() - 86400;
                     foreach ($queue as $r):
                         $rowStatus = (string) $r['status'];
@@ -119,13 +124,6 @@ $tabs = [
                                     <a class="btn btn-small adm-rowlink<?php echo $rowStatus === 'pending' ? '' : ' btn-outline'; ?>"
                                        href="index.php?view=report&amp;id=<?php echo (int) $r['id']; ?>">Open</a>
 
-                                    <?php // The same account-level decision the report page
-                                    // offers, one row earlier: an admin who can already
-                                    // see the owner does not have to open every report to
-                                    // close the account behind a recurring one. The reason
-                                    // is left to action.php's default here — a custom
-                                    // sentence belongs on the report page, where there is
-                                    // room to write one. ?>
                                     <?php if ($ownerBlocked): ?>
                                     <form action="action.php" method="POST"
                                           onsubmit="return confirm('Restore this account? They will be able to sign in again, and their listings return to the app.');">

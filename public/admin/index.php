@@ -41,7 +41,7 @@ unset($_SESSION['admin_flash']);
 
 // --- 4. Which view ---------------------------------------------
 $view = (string) ($_GET['view'] ?? 'overview');
-if (!in_array($view, ['overview', 'reports', 'report'], true)) {
+if (!in_array($view, ['overview', 'reports', 'report', 'owner'], true)) {
     $view = 'overview';
 }
 
@@ -185,25 +185,52 @@ if (!in_array($statusFilter, ['pending', 'resolved', 'dismissed', 'all'], true))
     $statusFilter = 'pending';
 }
 
+// Optional narrowing to one listing.
+$providerFilter = (int) ($_GET['provider'] ?? 0);
+
 $queue = [];
 $queueCounts = ['pending' => 0, 'resolved' => 0, 'dismissed' => 0];
+$queueListing = null;
 
 if ($view === 'reports') {
-    // Tab counters, from one grouped query.
-    foreach ($pdo->query(
-        'SELECT status, COUNT(*) AS n FROM profile_reports GROUP BY status'
-    )->fetchAll() as $row) {
-        $queueCounts[$row['status']] = (int) $row['n'];
+    if ($providerFilter > 0) {
+        $stmt = $pdo->prepare(
+            'SELECT id, profile_code, name, selected_title, profile_type,
+                    municipality, status
+               FROM providers
+              WHERE id = :id
+              LIMIT 1'
+        );
+        $stmt->execute([':id' => $providerFilter]);
+        $queueListing = $stmt->fetch() ?: null;
+
+        if ($queueListing === null) {
+            $providerFilter = 0;
+        }
     }
 
-    // The filter is validated against a whitelist above, so it is safe to
-    // splice into SQL — and it is a bound value anyway, which is what keeps
-    // this from being an injection point if the whitelist is ever loosened.
-    // Two joins onto `users`, so two aliases: `u` is who filed the report,
-    // `o` is who owns the listing. The owner comes along because a repeat
-    // offender is only visible as a person — three reports against three
-    // different listings are three unrelated rows until you can see they
-    // belong to one account, which is the one thing that can be blocked.
+    // Tab counters, scoped to the listing when one is chosen.
+    if ($providerFilter > 0) {
+        $stmt = $pdo->prepare(
+            'SELECT status, COUNT(*) AS n
+               FROM profile_reports
+              WHERE provider_id = :pid
+              GROUP BY status'
+        );
+        $stmt->execute([':pid' => $providerFilter]);
+        foreach ($stmt->fetchAll() as $row) {
+            $queueCounts[$row['status']] = (int) $row['n'];
+        }
+    } else {
+        foreach ($pdo->query(
+            'SELECT status, COUNT(*) AS n FROM profile_reports GROUP BY status'
+        )->fetchAll() as $row) {
+            $queueCounts[$row['status']] = (int) $row['n'];
+        }
+    }
+
+    // Filters are validated above and bound below. `u` is the reporter,
+    // `o` the listing's owner.
     $sql = "SELECT r.id, r.reason_code, r.status, r.created_at, r.listing_blocked,
                    p.id AS provider_id, p.profile_code, p.name, p.selected_title,
                    p.profile_type, p.municipality, p.status AS listing_status,
@@ -215,16 +242,20 @@ if ($view === 'reports') {
               JOIN users     u ON u.id = r.reporter_id
               JOIN users     o ON o.id = p.user_id";
     $params = [];
+    $where  = [];
 
     if ($statusFilter !== 'all') {
-        $sql .= ' WHERE r.status = :st';
+        $where[] = 'r.status = :st';
         $params[':st'] = $statusFilter;
     }
+    if ($providerFilter > 0) {
+        $where[] = 'r.provider_id = :pid';
+        $params[':pid'] = $providerFilter;
+    }
+    if (!empty($where)) {
+        $sql .= ' WHERE ' . implode(' AND ', $where);
+    }
 
-    // Open reports first, newest within each group: the queue is a work
-    // list, and an unresolved report is always more urgent than a closed one.
-    // LIMIT keeps a long history from turning this page into a slow dump —
-    // the filters are how you find something older than 200 rows.
     $sql .= ' ORDER BY (r.status = \'pending\') DESC, r.created_at DESC LIMIT 200';
 
     $stmt = $pdo->prepare($sql);
@@ -237,7 +268,6 @@ if ($view === 'reports') {
 // ------------------------------------------------------------
 $report       = null;
 $listing      = null;
-$owner        = null;
 $ownerOther   = [];
 $listingOther = [];
 $reporter     = null;
@@ -261,8 +291,6 @@ if ($view === 'report') {
         if ($report !== null) {
             $providerId = (int) $report['provider_id'];
 
-            // The listing exactly as it is stored — the admin judges what is
-            // really being shown to members, not what was reported about.
             $stmt = $pdo->prepare(
                 'SELECT p.*, u.full_name AS owner_name, u.email AS owner_email,
                         u.phone AS owner_phone, u.user_id AS owner_code,
@@ -278,14 +306,11 @@ if ($view === 'report') {
             $stmt->execute([':id' => $providerId]);
             $listing = $stmt->fetch() ?: null;
 
-            // The member who filed it, for context on the reporter.
             $stmt = $pdo->prepare('SELECT id, full_name, email, created_at FROM users WHERE id = :id LIMIT 1');
             $stmt->execute([':id' => (int) $report['reporter_id']]);
             $reporter = $stmt->fetch() ?: null;
 
-            // Moderation context: does this listing have a history, and does
-            // this owner have others? Both change how seriously to take a
-            // single report, so both are on the page.
+            // Report history for this listing, and the owner's other listings.
             $stmt = $pdo->prepare(
                 'SELECT id, reason_code, status, created_at
                    FROM profile_reports
@@ -298,12 +323,16 @@ if ($view === 'report') {
 
             if ($listing !== null) {
                 $stmt = $pdo->prepare(
-                    'SELECT id, profile_code, name, selected_title, profile_type,
-                            municipality, status, created_at
-                       FROM providers
-                      WHERE user_id = :uid AND id <> :id
-                      ORDER BY created_at DESC
-                      LIMIT 10'
+                    "SELECT p.id, p.profile_code, p.name, p.selected_title, p.profile_type,
+                            p.municipality, p.status, p.created_at,
+                            (SELECT COUNT(*) FROM profile_reports r
+                              WHERE r.provider_id = p.id) AS total_reports,
+                            (SELECT COUNT(*) FROM profile_reports r
+                              WHERE r.provider_id = p.id AND r.status = 'pending') AS open_reports
+                       FROM providers p
+                      WHERE p.user_id = :uid AND p.id <> :id
+                      ORDER BY open_reports DESC, p.created_at DESC
+                      LIMIT 10"
                 );
                 $stmt->execute([
                     ':uid' => (int) $listing['user_id'],
@@ -316,23 +345,91 @@ if ($view === 'report') {
 }
 
 // ------------------------------------------------------------
+// 5d. The owner profile, for investigating a report
+// ------------------------------------------------------------
+$ownerAccount  = null;
+$ownerListings = [];
+$ownerReportId = 0;
+
+if ($view === 'owner') {
+    $ownerId       = (int) ($_GET['id'] ?? 0);
+    $ownerReportId = (int) ($_GET['report_id'] ?? 0);
+
+    if ($ownerId > 0) {
+        // Only what the owner view reads — no password hash or
+        // verification code in scope for a screen that just displays.
+        $stmt = $pdo->prepare(
+            'SELECT id, user_id, full_name, email, phone, profile_picture,
+                    status, blocked_at, blocked_reason, created_at
+               FROM users
+              WHERE id = :id
+              LIMIT 1'
+        );
+        $stmt->execute([':id' => $ownerId]);
+        $ownerAccount = $stmt->fetch() ?: null;
+
+        if ($ownerAccount !== null) {
+            // Every listing this account owns, most-reported first.
+            $stmt = $pdo->prepare(
+                "SELECT p.id, p.profile_code, p.name, p.selected_title, p.profile_type,
+                        p.municipality, p.barangay, p.status, p.created_at,
+                        (SELECT COUNT(*) FROM profile_reports r
+                          WHERE r.provider_id = p.id) AS total_reports,
+                        (SELECT COUNT(*) FROM profile_reports r
+                          WHERE r.provider_id = p.id AND r.status = 'pending') AS open_reports
+                   FROM providers p
+                  WHERE p.user_id = :uid
+                  ORDER BY open_reports DESC, p.created_at DESC"
+            );
+            $stmt->execute([':uid' => $ownerId]);
+            $ownerListings = $stmt->fetchAll();
+        }
+    }
+}
+
+// ------------------------------------------------------------
 // 6. Page furniture
 // ------------------------------------------------------------
 $pageTitle    = 'Overview';
 $pageSubtitle = 'How islaFIND is doing right now.';
 
 if ($view === 'reports') {
-    $pageTitle    = 'Reported Listings';
-    $pageSubtitle = 'Everything members have reported, newest first.';
+    if ($queueListing !== null) {
+        $pageTitle    = 'Reports on ' . adm_listing_title($queueListing);
+        $pageSubtitle = 'Every report filed against this listing.';
+    } else {
+        $pageTitle    = 'Reported Listings';
+        $pageSubtitle = 'Everything members have reported, newest first.';
+    }
 } elseif ($view === 'report') {
     $pageTitle    = 'Report #' . ($report !== null ? (int) $report['id'] : '');
     $pageSubtitle = $report !== null
         ? isla_report_reason_label((string) $report['reason_code'])
         : 'That report could not be found.';
+} elseif ($view === 'owner') {
+    $pageTitle    = 'Owner profile';
+    $pageSubtitle = $ownerAccount !== null
+        ? (string) $ownerAccount['full_name'] . ' — every listing under this account.'
+        : 'That account could not be found.';
 }
 
 // The nav item that should read as current.
 $activeNav = $view === 'overview' ? 'overview' : 'reports';
+
+// Where the header's Back button goes. Every view but the overview has
+// one, so a detail screen is never a dead end: a report returns to the
+// queue, the owner to the report it was opened from (or the queue when
+// it was not), and the queue itself to the overview.
+$backHref = null;
+if ($view === 'reports') {
+    $backHref = 'index.php';
+} elseif ($view === 'report') {
+    $backHref = 'index.php?view=reports&status=pending';
+} elseif ($view === 'owner') {
+    $backHref = $ownerReportId > 0
+        ? 'index.php?view=report&id=' . $ownerReportId
+        : 'index.php?view=reports&status=pending';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -430,6 +527,12 @@ $activeNav = $view === 'overview' ? 'overview' : 'reports';
     <!-- ============ Main ============ -->
     <main class="adm-main">
         <header class="adm-top">
+            <?php if ($backHref !== null): ?>
+                <a class="adm-back" href="<?php echo e($backHref); ?>">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+                    Back
+                </a>
+            <?php endif; ?>
             <div>
                 <h1><?php echo e($pageTitle); ?></h1>
                 <p><?php echo e($pageSubtitle); ?></p>
@@ -455,13 +558,15 @@ $activeNav = $view === 'overview' ? 'overview' : 'reports';
             <?php elseif ($view === 'reports'): ?>
                 <?php require __DIR__ . '/views/reports.php'; ?>
 
+            <?php elseif ($view === 'owner'): ?>
+                <?php require __DIR__ . '/views/owner.php'; ?>
+
             <?php else: ?>
                 <?php require __DIR__ . '/views/report.php'; ?>
             <?php endif; ?>
 
         </div>
     </main>
-</div>
-<script src="<?php echo e(admin_asset_url('../admin_nav.js')); ?>"></script>
+</div><script src="<?php echo e(admin_asset_url('../admin_nav.js')); ?>"></script>
 </body>
 </html>
