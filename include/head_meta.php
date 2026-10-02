@@ -15,8 +15,13 @@
 //
 // The include prints the stylesheet + busy.js too, because every
 // page loads exactly those two files first — keeping them here
-// means a new page cannot forget them.
+// means a new page cannot forget them. Both, and any page script
+// added after this include, are stamped by asset_url()
+// (include/assets.php) so a cached copy is replaced the moment the
+// file changes.
 // ============================================================
+
+require_once __DIR__ . '/assets.php';
 
 $headTitle = isset($headTitle) && $headTitle !== ''
     ? $headTitle
@@ -56,5 +61,5 @@ $headDescEsc  = htmlspecialchars($headDesc, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'
     <meta name="twitter:title" content="<?php echo $headTitleEsc; ?>">
     <meta name="twitter:description" content="<?php echo $headDescEsc; ?>">
 
-    <link rel="stylesheet" href="style.css">
-    <script src="busy.js"></script>
+    <link rel="stylesheet" href="<?php echo asset_url('style.css'); ?>">
+    <script src="<?php echo asset_url('busy.js'); ?>"></script>

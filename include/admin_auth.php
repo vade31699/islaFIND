@@ -43,6 +43,10 @@
 // ------------------------------------------------------------------
 require_once __DIR__ . '/mailer.php';
 
+// admin_asset_url() below shares its stamping logic with the member
+// app's asset_url(); assets.php owns that primitive.
+require_once __DIR__ . '/assets.php';
+
 // ------------------------------------------------------------------
 // One-time-code policy for the SUPERADMIN sign-in challenge.
 // ------------------------------------------------------------------
@@ -550,4 +554,33 @@ function admin_forget(): void
         $_SESSION['admin_pending_mfa_change']
     );
     session_regenerate_id(true);
+}
+
+/**
+ * admin_asset_url(string $href): string
+ * Stamp an admin asset URL with the file's modification time, so a
+ * browser holding the old copy is forced to fetch the new one the
+ * moment the file changes.
+ *
+ * WHY THIS EXISTS even though public/.htaccess already sends
+ * "Expires: 0 seconds" for CSS and JS: a zero expiry tells the browser
+ * to revalidate, but a phone that backgrounds the panel — or restores
+ * a page from the back/forward cache — can still paint the copy it
+ * saved earlier, and a menu that only appears after a reload is the
+ * kind of change an operator reports as "it did not apply". A `?v=`
+ * stamp gives the browser something concrete to compare instead.
+ *
+ * Generic on purpose: pass the href exactly as it is written in the
+ * page and it works for any admin-side asset, stylesheet or script.
+ * The path is resolved from public/admin/, which is where those pages
+ * link from; a file that cannot be read is returned untouched rather
+ * than taking the page down over an asset stamp. The stamping itself
+ * lives in include/assets.php, which the member app shares.
+ *
+ * @param string $href URL as written in the page, e.g. '../admin.css'.
+ * @return string The href with ?v=<mtime> appended.
+ */
+function admin_asset_url(string $href): string
+{
+    return isla_asset_stamp($href, __DIR__ . '/../public/admin');
 }

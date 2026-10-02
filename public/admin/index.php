@@ -199,13 +199,21 @@ if ($view === 'reports') {
     // The filter is validated against a whitelist above, so it is safe to
     // splice into SQL — and it is a bound value anyway, which is what keeps
     // this from being an injection point if the whitelist is ever loosened.
+    // Two joins onto `users`, so two aliases: `u` is who filed the report,
+    // `o` is who owns the listing. The owner comes along because a repeat
+    // offender is only visible as a person — three reports against three
+    // different listings are three unrelated rows until you can see they
+    // belong to one account, which is the one thing that can be blocked.
     $sql = "SELECT r.id, r.reason_code, r.status, r.created_at, r.listing_blocked,
                    p.id AS provider_id, p.profile_code, p.name, p.selected_title,
                    p.profile_type, p.municipality, p.status AS listing_status,
-                   u.full_name AS reporter_name
+                   u.full_name AS reporter_name,
+                   o.id AS owner_id, o.full_name AS owner_name,
+                   o.status AS owner_status, o.blocked_reason AS owner_blocked_reason
               FROM profile_reports r
               JOIN providers p ON p.id = r.provider_id
-              JOIN users     u ON u.id = r.reporter_id";
+              JOIN users     u ON u.id = r.reporter_id
+              JOIN users     o ON o.id = p.user_id";
     $params = [];
 
     if ($statusFilter !== 'all') {
@@ -259,7 +267,9 @@ if ($view === 'report') {
                 'SELECT p.*, u.full_name AS owner_name, u.email AS owner_email,
                         u.phone AS owner_phone, u.user_id AS owner_code,
                         u.profile_picture AS account_photo,
-                        u.created_at AS owner_since
+                        u.created_at AS owner_since,
+                        u.status AS owner_status, u.blocked_at AS owner_blocked_at,
+                        u.blocked_reason AS owner_blocked_reason
                    FROM providers p
                    JOIN users u ON u.id = p.user_id
                   WHERE p.id = :id
@@ -333,11 +343,27 @@ $activeNav = $view === 'overview' ? 'overview' : 'reports';
          search result, and the listing pages it links to are the app's. -->
     <meta name="robots" content="noindex, nofollow">
     <title><?php echo e($pageTitle . ' · islaFIND Admin'); ?></title>
-    <link rel="stylesheet" href="../style.css">
-    <link rel="stylesheet" href="../admin.css">
+    <link rel="stylesheet" href="<?php echo e(admin_asset_url('../style.css')); ?>">
+    <link rel="stylesheet" href="<?php echo e(admin_asset_url('../admin.css')); ?>">
 </head>
 <body>
 <div class="adm">
+
+    <!-- Below 860px this checkbox folds the sections, the account row and
+         the sign-out button behind the hamburger — the round header
+         button, and the card of rows, the member app uses for the same
+         job — and stands the page content down while it is open. That is
+         what opening the menu does in the member app: the menu takes the
+         screen, not a slice of it.
+
+         It sits out here, in front of both columns, rather than inside
+         the sidebar, because a checked box can only style what comes
+         after it — and this one has to reach the sidebar (what unfolds)
+         as well as the main column (what gets out of the way). A
+         checkbox rather than a script keeps the panel working with
+         JavaScript off, which matters for a moderation tool an operator
+         may open on a locked-down machine. -->
+    <input type="checkbox" id="adm-menu" class="adm-menu-toggle">
 
     <!-- ============ Sidebar ============ -->
     <aside class="adm-side">
@@ -347,40 +373,57 @@ $activeNav = $view === 'overview' ? 'overview' : 'reports';
                 <strong>islaFIND</strong>
                 <span>Superadmin</span>
             </div>
+            <label class="adm-burger" for="adm-menu">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <span class="adm-burger-text">Menu</span>
+            </label>
         </div>
 
-        <nav class="adm-nav" aria-label="Admin sections">
-            <a class="adm-nav-link<?php echo $activeNav === 'overview' ? ' is-active' : ''; ?>" href="index.php">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
-                Overview
-            </a>
-            <a class="adm-nav-link<?php echo $activeNav === 'reports' ? ' is-active' : ''; ?>" href="index.php?view=reports&amp;status=pending">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                Reports
-                <?php if ($pendingCount > 0): ?>
-                    <span class="adm-nav-count"><?php echo (int) $pendingCount; ?></span>
-                <?php endif; ?>
-            </a>
-            <a class="adm-nav-link<?php echo ($_SERVER['SCRIPT_NAME'] ?? '') !== '' && str_ends_with((string) ($_SERVER['SCRIPT_NAME'] ?? ''), 'settings.php') ? ' is-active' : ''; ?>" href="settings.php">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.61.77 1.02 1.41 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                Settings
-            </a>
-        </nav>
+        <!-- Everything the hamburger folds: the sections, then the
+             account row and the sign-out button. On a phone this is
+             one card of rows, like the member app's menu.
+             The inner div is the card's single grid item, which is
+             what lets the animation below reveal it from nothing
+             without a guessed max-height. -->
+        <div class="adm-hub">
+            <div class="adm-hub-inner">
+                <nav class="adm-nav" aria-label="Admin sections">
+                    <a class="adm-nav-link<?php echo $activeNav === 'overview' ? ' is-active' : ''; ?>" href="index.php">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+                        <span class="adm-nav-label">Overview</span>
+                        <span class="adm-nav-go" aria-hidden="true">&#8250;</span>
+                    </a>
+                    <a class="adm-nav-link<?php echo $activeNav === 'reports' ? ' is-active' : ''; ?>" href="index.php?view=reports&amp;status=pending">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        <span class="adm-nav-label">Reports</span>
+                        <?php if ($pendingCount > 0): ?>
+                            <span class="adm-nav-count"><?php echo (int) $pendingCount; ?></span>
+                        <?php endif; ?>
+                        <span class="adm-nav-go" aria-hidden="true">&#8250;</span>
+                    </a>
+                    <a class="adm-nav-link<?php echo ($_SERVER['SCRIPT_NAME'] ?? '') !== '' && str_ends_with((string) ($_SERVER['SCRIPT_NAME'] ?? ''), 'settings.php') ? ' is-active' : ''; ?>" href="settings.php">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.61.77 1.02 1.41 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        <span class="adm-nav-label">Settings</span>
+                        <span class="adm-nav-go" aria-hidden="true">&#8250;</span>
+                    </a>
+                </nav>
 
-        <div class="adm-side-foot">
-            <div class="adm-who">
-                <div class="adm-who-avatar"><?php echo e(strtoupper(substr((string) ($admin['full_name'] ?: $admin['email']), 0, 1))); ?></div>
-                <div class="adm-who-text">
-                    <strong><?php echo e($admin['full_name'] ?: 'Superadmin'); ?></strong>
-                    <span><?php echo e($admin['email']); ?></span>
+                <div class="adm-side-foot">
+                    <div class="adm-who">
+                        <div class="adm-who-avatar"><?php echo e(strtoupper(substr((string) ($admin['full_name'] ?: $admin['email']), 0, 1))); ?></div>
+                        <div class="adm-who-text">
+                            <strong><?php echo e($admin['full_name'] ?: 'Superadmin'); ?></strong>
+                            <span><?php echo e($admin['email']); ?></span>
+                        </div>
+                    </div>
+                    <!-- POST, not a link: signing out is a state change, and a GET
+                         link would let any page log an admin out with an <img>. -->
+                    <form action="logout.php" method="POST">
+                        <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
+                        <button type="submit" class="btn btn-outline btn-block btn-small">Sign out</button>
+                    </form>
                 </div>
             </div>
-            <!-- POST, not a link: signing out is a state change, and a GET
-                 link would let any page log an admin out with an <img>. -->
-            <form action="logout.php" method="POST">
-                <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
-                <button type="submit" class="btn btn-outline btn-block btn-small">Sign out</button>
-            </form>
         </div>
     </aside>
 
@@ -419,5 +462,6 @@ $activeNav = $view === 'overview' ? 'overview' : 'reports';
         </div>
     </main>
 </div>
+<script src="<?php echo e(admin_asset_url('../admin_nav.js')); ?>"></script>
 </body>
 </html>

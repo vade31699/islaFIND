@@ -29,9 +29,18 @@ if ($providerId <= 0) {
 
 // --- 4. Database connection -------------------------------------
 require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/listing_visibility.php';
 
 // --- 5. Load the provider (category is needed for affinity) ------
-$stmt = $pdo->prepare('SELECT id, selected_title FROM providers WHERE id = :id AND status = \'active\' LIMIT 1');
+// Same visibility rule as the feed: a listing whose own status or whose
+// OWNER's status is blocked is not there to be viewed (see
+// include/listing_visibility.php).
+$stmt = $pdo->prepare(
+    'SELECT p.id, p.selected_title
+       FROM providers p
+       ' . isla_listing_live_join() . '
+      WHERE p.id = :id AND ' . isla_listing_live_where() . ' LIMIT 1'
+);
 $stmt->execute([':id' => $providerId]);
 $provider = $stmt->fetch();
 

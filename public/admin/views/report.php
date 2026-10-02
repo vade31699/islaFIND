@@ -36,6 +36,14 @@ $reportId     = (int) $report['id'];
 $isPending    = (string) $report['status'] === 'pending';
 $listingState = (string) ($listing['status'] ?? 'active');
 $isBlocked    = $listingState === 'blocked';
+// The OTHER kind of block. A listing block hides the listing; an account
+// block closes the person behind it, which is what an admin reaches for
+// when the same owner keeps turning up in this queue. The two are
+// independent: an account can be blocked with every listing still
+// 'active' in the database, which is what lets unblocking put all of
+// them back at once.
+$ownerBlocked = $listing !== null
+             && (string) ($listing['owner_status'] ?? 'active') === 'blocked';
 $reasonLabel  = isla_report_reason_label((string) $report['reason_code']);
 $evidence     = trim((string) ($report['evidence_image'] ?? ''));
 
@@ -174,6 +182,23 @@ if ($listing !== null) {
                         <dt>Phone</dt>
                         <dd><?php echo e((string) ($listing['owner_phone'] ?? '—')); ?></dd>
 
+                        <dt>Account</dt>
+                        <dd>
+                            <?php if ($ownerBlocked): ?>
+                                <span class="adm-badge adm-badge-blocked"><span class="adm-badge-dot"></span>Blocked</span>
+                                <?php if (!empty($listing['owner_blocked_at'])): ?>
+                                    <span class="adm-secondary">
+                                        since <?php echo e(adm_time_ago((string) $listing['owner_blocked_at'])); ?>
+                                        <?php if (!empty($listing['owner_blocked_reason'])): ?>
+                                            — <?php echo e((string) $listing['owner_blocked_reason']); ?>
+                                        <?php endif; ?>
+                                    </span>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <span class="adm-badge adm-badge-active"><span class="adm-badge-dot"></span>Live</span>
+                            <?php endif; ?>
+                        </dd>
+
                         <dt>Location</dt>
                         <dd>
                             <?php echo e(trim(((string) ($listing['barangay'] ?? '')) . ', ' . ((string) ($listing['municipality'] ?? '')), ', ')); ?>
@@ -239,7 +264,12 @@ if ($listing !== null) {
     <div class="adm-panel-head">
         <div>
             <h2>Decide</h2>
-            <p>Blocking hides the listing from every part of the app. The owner keeps it and can see it is blocked.</p>
+            <p>
+                Blocking a listing hides that listing from every part of the app; the owner keeps it, and can see
+                that it is blocked. Blocking the account goes further — sign-in is refused, any session they have
+                open ends, and every listing they own leaves the app. It is the only one of the two that answers
+                the person rather than the page, so reach for it when the same owner keeps appearing here.
+            </p>
         </div>
     </div>
 
@@ -276,6 +306,51 @@ if ($listing !== null) {
             <div class="adm-actions-row">
                 <button type="submit" class="btn btn-small">Unblock this listing</button>
                 <span class="adm-secondary">It returns to the feed and search at once.</span>
+            </div>
+        </form>
+        <?php endif; ?>
+
+        <!-- Blocking the owner's account. Offered next to the listing
+             block because that is the decision it competes with: hide
+             this one listing, or close the account behind it.
+             The reason is stored on the account and is the sentence the
+             owner reads on the sign-in screen, so it is written as one. -->
+        <?php if ($listing !== null && !$ownerBlocked): ?>
+        <form action="action.php" method="POST" class="adm-note-box"
+              onsubmit="return confirm('Block this owner\'s account? They will be signed out, unable to sign in again, and every listing they own disappears from the app.');">
+            <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
+            <input type="hidden" name="do" value="block_account">
+            <input type="hidden" name="owner_id" value="<?php echo (int) ($listing['user_id'] ?? 0); ?>">
+            <input type="hidden" name="report_id" value="<?php echo $reportId; ?>">
+
+            <div class="form-group">
+                <label class="field-label" for="blockAccountReason">Reason for blocking the account (shown to the owner when they try to sign in)</label>
+                <input class="field-in" type="text" id="blockAccountReason" name="reason"
+                       maxlength="255" placeholder="<?php echo e($reasonLabel); ?>"
+                       value="<?php echo e($reasonLabel); ?>">
+            </div>
+
+            <div class="adm-actions-row is-spaced">
+                <button type="submit" class="btn btn-danger btn-small">Block the owner's account</button>
+                <span class="adm-secondary">
+                    Hides every listing they own, signs them out and refuses the next sign-in.
+                    Nothing is deleted — unblocking brings all of it back.
+                </span>
+            </div>
+        </form>
+        <?php elseif ($listing !== null && $ownerBlocked): ?>
+        <form action="action.php" method="POST"
+              onsubmit="return confirm('Restore this account? They will be able to sign in again, and their listings return to the app.');">
+            <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
+            <input type="hidden" name="do" value="unblock_account">
+            <input type="hidden" name="owner_id" value="<?php echo (int) ($listing['user_id'] ?? 0); ?>">
+            <input type="hidden" name="report_id" value="<?php echo $reportId; ?>">
+            <div class="adm-actions-row">
+                <button type="submit" class="btn btn-small">Unblock this account</button>
+                <span class="adm-secondary">
+                    Their listings are live again and the reason on the account is cleared.
+                    Reports already resolved by the block stay resolved.
+                </span>
             </div>
         </form>
         <?php endif; ?>

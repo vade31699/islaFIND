@@ -1038,8 +1038,8 @@ include __DIR__ . '/../include/head_meta.php';
             });
         }
     </script>
-    <script src="messenger.js"></script>
-    <script src="message_delete.js"></script>
-    <script src="messenger_live.js"></script>
+    <script src="<?php echo asset_url('messenger.js'); ?>"></script>
+    <script src="<?php echo asset_url('message_delete.js'); ?>"></script>
+    <script src="<?php echo asset_url('messenger_live.js'); ?>"></script>
 </body>
 </html>

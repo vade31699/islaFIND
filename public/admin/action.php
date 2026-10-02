@@ -8,6 +8,8 @@
 //
 //   do=block_listing   provider_id, reason
 //   do=unblock_listing provider_id
+//   do=block_account   owner_id, reason, report_id (to come back to)
+//   do=unblock_account owner_id, report_id
 //   do=resolve_report  report_id, outcome=resolved, notes
 //   do=dismiss_report  report_id, outcome=dismissed, notes
 //   do=save_note       report_id, notes
@@ -62,7 +64,11 @@ if (!csrf_check()) {
 
 $action = (string) ($_POST['do'] ?? '');
 
-$allowedActions = ['block_listing', 'unblock_listing', 'resolve_report', 'dismiss_report', 'save_note'];
+$allowedActions = [
+    'block_listing', 'unblock_listing',
+    'block_account', 'unblock_account',
+    'resolve_report', 'dismiss_report', 'save_note',
+];
 if (!in_array($action, $allowedActions, true)) {
     adm_redirect('error', 'Unknown action.', 'index.php');
 }
@@ -160,6 +166,124 @@ if ($action === 'unblock_listing') {
     // reason it was hidden is stale on the listing. The reports keep their
     // own history, which is where the record belongs.
     adm_redirect('success', 'Listing restored to the feed.', 'index.php?view=reports&status=pending');
+}
+
+// --- 4b. Block the OWNER's account ----------------------------
+// The bigger hammer, next to the listing block above. Where that hides
+// one listing, this closes the whole account: the sign-in is refused
+// (login.php), any session already open is dropped
+// (include/member_guard.php) and every listing they own leaves
+// discovery, because the public reads filter on the owner's status
+// (include/listing_visibility.php).
+//
+// Not one providers row is touched, which is the point: the listings
+// keep their own status, photos and history, so unblocking restores all
+// of them exactly as they were — no "which ones did the block hide?"
+// bookkeeping.
+if ($action === 'block_account') {
+    $ownerId  = (int) ($_POST['owner_id'] ?? 0);
+    $reportId = (int) ($_POST['report_id'] ?? 0);
+    $reason   = trim((string) ($_POST['reason'] ?? ''));
+
+    if ($ownerId <= 0) {
+        adm_redirect('error', 'Which account?', 'index.php');
+    }
+    if (strlen($reason) > 255) {
+        $reason = substr($reason, 0, 255);
+    }
+    if ($reason === '') {
+        // Same reasoning as a listing block: a block with no recorded
+        // reason is one nobody can appeal sensibly.
+        $reason = 'Repeated or serious reports';
+    }
+
+    $stmt = $pdo->prepare(
+        "UPDATE users
+            SET status         = 'blocked',
+                blocked_at     = NOW(),
+                blocked_reason = :reason
+          WHERE id = :id AND status <> 'blocked'"
+    );
+    $stmt->execute([':reason' => $reason, ':id' => $ownerId]);
+
+    if ($stmt->rowCount() === 0) {
+        // Either no such account, or it was already blocked. Only the
+        // first is worth a message.
+        $check = $pdo->prepare('SELECT status FROM users WHERE id = :id LIMIT 1');
+        $check->execute([':id' => $ownerId]);
+        if ($check->fetchColumn() === false) {
+            adm_redirect('error', 'That account no longer exists.', 'index.php');
+        }
+        adm_redirect('error', 'That account is already blocked.', 'index.php');
+    }
+
+    // Every open report on anything this account owns is answered by the
+    // block, for the same reason a listing block answers the reports on
+    // its listing: the admin acted on the thing being reported, and
+    // leaving those rows pending would put the queue out of step with
+    // reality. `listing_blocked` is deliberately NOT set — it means "this
+    // listing was blocked", and no listing was.
+    $stmt = $pdo->prepare(
+        "UPDATE profile_reports r
+            JOIN providers p ON p.id = r.provider_id
+            SET r.status      = 'resolved',
+                r.admin_notes = CASE
+                                  WHEN r.admin_notes IS NULL OR r.admin_notes = ''
+                                  THEN CONCAT('Owner account blocked by admin: ', :reason)
+                                  ELSE r.admin_notes
+                                END,
+                r.resolved_by = :admin,
+                r.resolved_at = NOW()
+          WHERE p.user_id = :owner AND r.status = 'pending'"
+    );
+    $stmt->execute([
+        ':reason' => $reason,
+        ':admin'  => (int) $admin['id'],
+        ':owner'  => $ownerId,
+    ]);
+    $closed = $stmt->rowCount();
+
+    // Back to the report the admin was reading, where the account's new
+    // state is on screen — falling back to the queue when the action was
+    // fired from somewhere without one.
+    adm_redirect(
+        'success',
+        'Account blocked: sign-in refused, session ended, and every listing it owns is hidden.'
+        . ($closed > 0 ? ' ' . $closed . ' open report(s) resolved.' : ''),
+        $reportId > 0 ? 'index.php?view=report&id=' . $reportId : 'index.php?view=reports&status=pending'
+    );
+}
+
+// --- 4c. Unblock an account -----------------------------------
+if ($action === 'unblock_account') {
+    $ownerId  = (int) ($_POST['owner_id'] ?? 0);
+    $reportId = (int) ($_POST['report_id'] ?? 0);
+
+    if ($ownerId <= 0) {
+        adm_redirect('error', 'Which account?', 'index.php');
+    }
+
+    $stmt = $pdo->prepare(
+        "UPDATE users
+            SET status         = 'active',
+                blocked_at     = NULL,
+                blocked_reason = NULL
+          WHERE id = :id AND status = 'blocked'"
+    );
+    $stmt->execute([':id' => $ownerId]);
+
+    if ($stmt->rowCount() === 0) {
+        adm_redirect('error', 'That account is not blocked (or no longer exists).', 'index.php');
+    }
+
+    // Nothing else to undo: the listings were never touched. Reports
+    // resolved by the block stay resolved — reopening the queue is a
+    // second decision, not a side effect of this one.
+    adm_redirect(
+        'success',
+        'Account restored. Its listings are live again, and the owner can sign in.',
+        $reportId > 0 ? 'index.php?view=report&id=' . $reportId : 'index.php?view=reports&status=pending'
+    );
 }
 
 // --- 5. Report outcomes ---------------------------------------

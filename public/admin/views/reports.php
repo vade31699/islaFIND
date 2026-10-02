@@ -46,6 +46,7 @@ $tabs = [
                     <thead>
                         <tr>
                             <th scope="col">Listing</th>
+                            <th scope="col">Owner</th>
                             <th scope="col">Reason</th>
                             <th scope="col">Report</th>
                             <th scope="col">Listing state</th>
@@ -76,6 +77,20 @@ $tabs = [
                                 </span>
                             </td>
                             <td>
+                                <?php $ownerBlocked = (string) $r['owner_status'] === 'blocked'; ?>
+                                <span class="adm-primary"><?php echo e((string) $r['owner_name']); ?></span>
+                                <?php if ($ownerBlocked): ?>
+                                    <span class="adm-secondary">
+                                        Account blocked
+                                        <?php if (trim((string) ($r['owner_blocked_reason'] ?? '')) !== ''): ?>
+                                            — <?php echo e((string) $r['owner_blocked_reason']); ?>
+                                        <?php endif; ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span class="adm-secondary">Owns this listing</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
                                 <?php echo e(isla_report_reason_label((string) $r['reason_code'])); ?>
                                 <?php if ((int) $r['listing_blocked'] === 1): ?>
                                     <span class="adm-secondary">Listing was blocked</span>
@@ -100,8 +115,37 @@ $tabs = [
                             <td><?php echo e((string) $r['reporter_name']); ?></td>
                             <td><?php echo e(adm_time_ago((string) $r['created_at'])); ?></td>
                             <td class="adm-cell-actions">
-                                <a class="btn btn-small adm-rowlink<?php echo $rowStatus === 'pending' ? '' : ' btn-outline'; ?>"
-                                   href="index.php?view=report&amp;id=<?php echo (int) $r['id']; ?>">Open</a>
+                                <div class="adm-row-actions">
+                                    <a class="btn btn-small adm-rowlink<?php echo $rowStatus === 'pending' ? '' : ' btn-outline'; ?>"
+                                       href="index.php?view=report&amp;id=<?php echo (int) $r['id']; ?>">Open</a>
+
+                                    <?php // The same account-level decision the report page
+                                    // offers, one row earlier: an admin who can already
+                                    // see the owner does not have to open every report to
+                                    // close the account behind a recurring one. The reason
+                                    // is left to action.php's default here — a custom
+                                    // sentence belongs on the report page, where there is
+                                    // room to write one. ?>
+                                    <?php if ($ownerBlocked): ?>
+                                    <form action="action.php" method="POST"
+                                          onsubmit="return confirm('Restore this account? They will be able to sign in again, and their listings return to the app.');">
+                                        <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
+                                        <input type="hidden" name="do" value="unblock_account">
+                                        <input type="hidden" name="owner_id" value="<?php echo (int) $r['owner_id']; ?>">
+                                        <input type="hidden" name="report_id" value="<?php echo (int) $r['id']; ?>">
+                                        <button type="submit" class="btn btn-small btn-outline">Unblock</button>
+                                    </form>
+                                    <?php else: ?>
+                                    <form action="action.php" method="POST"
+                                          onsubmit="return confirm('Block this owner\'s account? They will be signed out, unable to sign in again, and every listing they own disappears from the app.');">
+                                        <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
+                                        <input type="hidden" name="do" value="block_account">
+                                        <input type="hidden" name="owner_id" value="<?php echo (int) $r['owner_id']; ?>">
+                                        <input type="hidden" name="report_id" value="<?php echo (int) $r['id']; ?>">
+                                        <button type="submit" class="btn btn-small btn-danger">Block</button>
+                                    </form>
+                                    <?php endif; ?>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>

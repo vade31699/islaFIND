@@ -61,6 +61,7 @@ if (!isset($_SESSION['user_id'])) {
 // --- 3. Database + shared helpers -----------------------------
 require_once __DIR__ . '/../include/db.php';
 require_once __DIR__ . '/../include/reporting.php';
+require_once __DIR__ . '/../include/listing_visibility.php';
 require_once __DIR__ . '/../include/uploads.php';
 
 /**
@@ -128,14 +129,20 @@ if ($reasonCode === 'other' && strlen($details) < 10) {
 
 // --- 6. The listing -------------------------------------------
 $stmt = $pdo->prepare(
-    'SELECT id, user_id, status, name, selected_title, profile_type
-       FROM providers
-      WHERE id = :id
+    'SELECT p.id, p.user_id, p.status, p.name, p.selected_title, p.profile_type
+       FROM providers p
+       ' . isla_listing_live_join() . '
+      WHERE p.id = :id AND ' . isla_listing_live_where() . '
       LIMIT 1'
 );
 $stmt->execute([':id' => $providerId]);
 $listing = $stmt->fetch();
 
+// No row means either the listing is gone or it is not discoverable —
+// its own block, or its owner's account block (the JOIN above filters
+// on both, see include/listing_visibility.php). The member is told the
+// same thing either way, because from where they are standing the
+// listing is simply not there.
 if (!$listing) {
     report_back('error', 'That listing no longer exists.', $returnTo);
 }

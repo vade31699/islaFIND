@@ -34,6 +34,7 @@ require_once __DIR__ . '/../include/db.php';
 require_once __DIR__ . '/../include/categories.php';
 require_once __DIR__ . '/../include/uploads.php';
 require_once __DIR__ . '/../include/reporting.php';   // the report reasons offered in the modal
+require_once __DIR__ . '/../include/listing_visibility.php'; // who may discover a listing (blocked listing vs blocked owner)
 require_once __DIR__ . '/../include/mailer.php';      // the e-mail-change code (6e)
 
 // How long the 6-digit "confirm your new address" code stays valid.
@@ -954,16 +955,24 @@ $stmt = $pdo->query(
                      WHERE oj.provider_id = p.user_id AND oj.status = \'accepted\')        AS on_job
      FROM providers p
      JOIN users u ON u.id = p.user_id
-     WHERE p.status = \'active\'
+     WHERE ' . isla_listing_live_where() . '
      ORDER BY p.created_at DESC'
 );
 // This ONE query feeds both the Home feed and the catalogue panel, so
-// the status filter here is what keeps a blocked listing out of
-// discovery everywhere. A blocked provider is not "hidden from search"
-// but removed from the island: their card, their deep link and their
-// photos all stop existing for everyone else. They keep full control of
-// the listing from Settings (the query above loads the OWNER's listings,
+// the filter here is what keeps a blocked listing out of discovery
+// everywhere. A blocked provider is not "hidden from search" but
+// removed from the island: their card, their deep link and their photos
+// all stop existing for everyone else. They keep full control of the
+// listing from Settings (the query above loads the OWNER's listings,
 // unfiltered, so a blocked owner can still read the reason and fix it).
+//
+// isla_listing_live_where() covers BOTH kinds of block: the listing's
+// own (providers.status) and the account-level one an admin can set on
+// the owner from the report queue (users.status; see
+// include/listing_visibility.php). The same condition is applied to the
+// single-listing reads that members can reach directly — the reviews
+// endpoint, view tracking, bookmarks, reporting and hiring — so a
+// blocked owner's catalogue is gone from all of them, not just here.
 $allProviders = $stmt->fetchAll();
 
 // --- 8. Every listing's photo album -----------------------------
@@ -1256,7 +1265,7 @@ $headDesc  = 'Your islaFIND home feed, listings, jobs and account settings.';
 include __DIR__ . '/../include/head_meta.php';
 ?>
     <!-- Strength meter for the Change Password fields below -->
-    <script src="password_strength.js"></script>
+    <script src="<?php echo asset_url('password_strength.js'); ?>"></script>
 </head>
 <body>
 

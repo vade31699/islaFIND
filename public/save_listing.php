@@ -51,6 +51,7 @@ if (!isset($_SESSION['user_id'])) {
 
 // --- 3. Database connection ------------------------------------
 require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/listing_visibility.php';
 
 // --- 4. Load the current user ----------------------------------
 $stmt = $pdo->prepare('SELECT id FROM users WHERE id = :id LIMIT 1');
@@ -155,7 +156,14 @@ if ($providerId <= 0) {
 }
 
 // --- 7. The listing must exist ---------------------------------
-  $stmt = $pdo->prepare('SELECT id, user_id FROM providers WHERE id = :id AND status = \'active\' LIMIT 1');
+  // Nothing may be bookmarked that members cannot find — including a
+  // listing whose OWNER has been blocked (include/listing_visibility.php).
+  $stmt = $pdo->prepare(
+      'SELECT p.id, p.user_id
+         FROM providers p
+         ' . isla_listing_live_join() . '
+        WHERE p.id = :id AND ' . isla_listing_live_where() . ' LIMIT 1'
+  );
 $stmt->execute([':id' => $providerId]);
 $provider = $stmt->fetch();
 

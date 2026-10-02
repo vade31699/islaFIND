@@ -414,7 +414,7 @@ include __DIR__ . '/../include/head_meta.php';
     </div>
 
     <!-- Step 1 / Step 2 interactivity (type toggle + live search) -->
-    <script src="profile_script.js"></script>
+    <script src="<?php echo asset_url('profile_script.js'); ?>"></script>
 
     <!-- Cascading address data (step 3) — rendered from the same
          $municipalities array in categories.php, so the JS dropdown
@@ -430,7 +430,7 @@ include __DIR__ . '/../include/head_meta.php';
     </script>
     <!-- Step 3 location logic (municipality cascade + GPS pin +
          business Google Maps pin) -->
-    <script src="maps_pinning.js"></script>
+    <script src="<?php echo asset_url('maps_pinning.js'); ?>"></script>
 
 </body>
 </html>

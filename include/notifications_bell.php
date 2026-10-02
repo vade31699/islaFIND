@@ -9,7 +9,15 @@
 // notifications (dashboard.php is the only one that does today).
 // The badge number is filled by JavaScript on load, so there is
 // nothing to precompute server-side here.
+//
+// It also loads notifications.js, and stamps it through asset_url()
+// (include/assets.php) like every other page asset — a stale poller
+// against a changed endpoint is exactly the kind of bug the version
+// stamp exists to prevent. assets.php is required here rather than
+// left to the page: a partial owns its own dependencies.
 // ============================================================
+
+require_once __DIR__ . '/assets.php';
 ?>
 <div class="notif-wrap" id="notifWrap">
     <!-- The bell button: same round translucent look as the other
@@ -28,4 +36,4 @@
         <div class="notif-list" id="notifList"></div>
     </div>
 </div>
-<script src="notifications.js"></script>
+<script src="<?php echo asset_url('notifications.js'); ?>"></script>

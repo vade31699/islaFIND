@@ -21,6 +21,11 @@
 // every page from here on. Both are dependency-free and cheap.
 require_once __DIR__ . '/db_settings.php';
 
+// member_guard.php holds the policy for a blocked account; it is called
+// at the bottom of this file, once there is a connection to check
+// against (see section 4).
+require_once __DIR__ . '/member_guard.php';
+
 /**
  * isla_ensure_schema(PDO $pdo)
  * Creates tables that a feature added AFTER the database was first
@@ -324,6 +329,33 @@ function isla_ensure_schema(PDO $pdo): void
         if (!isla_schema_has_column($pdo, 'providers', 'blocked_reason')) {
             $pdo->exec('ALTER TABLE providers ADD COLUMN blocked_reason VARCHAR(255) NULL DEFAULT NULL');
         }
+
+        // ------------------------------------------------------------------
+        // users.status + blocked_* — the account-level block
+        //
+        // A listing block hides one listing. This hides the ACCOUNT: the
+        // sign-in is refused, any live session is dropped (see
+        // include/member_guard.php) and every listing they own stops being
+        // discoverable, because the public reads join the owner and filter
+        // on their status (see include/listing_visibility.php). The rows
+        // themselves are never touched, so unblocking restores every
+        // listing exactly as it was.
+        //
+        // 'active' is the default, so every existing account is live and
+        // nothing disappears when these columns land.
+        // ------------------------------------------------------------------
+        if (!isla_schema_has_column($pdo, 'users', 'status')) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active' AFTER mfa_enabled");
+        }
+        if (!isla_schema_has_column($pdo, 'users', 'blocked_at')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN blocked_at TIMESTAMP NULL DEFAULT NULL');
+        }
+        if (!isla_schema_has_column($pdo, 'users', 'blocked_reason')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN blocked_reason VARCHAR(255) NULL DEFAULT NULL');
+        }
+        if (!isla_schema_has_index($pdo, 'users', 'idx_users_status')) {
+            $pdo->exec('ALTER TABLE users ADD KEY idx_users_status (status)');
+        }
     } catch (PDOException $e) {
         // Logged, never fatal: the app keeps working, only the new
         // feature that needs this table reports itself unavailable.
@@ -347,6 +379,14 @@ try {
     // Runs the once-per-session guard below; defined here so the DDL
     // lives with the connection that owns it.
     isla_ensure_schema($pdo);
+
+    // --- 4. A blocked account gets no further than here ----------
+    // After the schema check, so the users.status it reads has already
+    // been added on an older database. This is the one line that makes
+    // "blocked" mean something for a session that is already open: the
+    // member pages each write their own session guard, so a check that
+    // lived in the pages could be forgotten by the next page added.
+    isla_refuse_blocked_member($pdo);
 
 } catch (PDOException $e) {
     // --- Connection failed ------------------------------------

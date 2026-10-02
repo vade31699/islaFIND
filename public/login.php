@@ -87,6 +87,20 @@ $justReset = isset($_GET['reset']) && $_GET['reset'] === 'done';
 // silent bounce to a blank login form.
 $justDeleted = isset($_GET['deleted']) && $_GET['deleted'] === '1';
 
+// login.php?blocked=1 — a blocked account just lost its session. Two
+// things set it: include/member_guard.php, which cuts a live session off
+// on the next request, and the sign-in attempt below, which proves the
+// password first and only then says the account is closed (so the form
+// never tells a stranger which addresses exist). Only that second path
+// knows WHY, so it leaves the reason in the session for the panel to
+// print; a dropped session gets the plain message.
+$justBlocked    = isset($_GET['blocked']) && $_GET['blocked'] === '1';
+$blockedReason  = '';
+if ($justBlocked && isset($_SESSION['login_blocked_reason'])) {
+    $blockedReason = (string) $_SESSION['login_blocked_reason'];
+    unset($_SESSION['login_blocked_reason']);          // one-shot
+}
+
 // login.php?cancel_verify=1 — explicit escape from the Verify panel.
 // Clears any pending email-verification / MFA challenge so a hard
 // refresh of a stale ?verify=1 URL returns to the login page instead.
@@ -835,9 +849,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // admin with that address and admin_verify_password() returned
             // false without deciding anything.
             if (empty($errors)) {
+                // status + blocked_reason come along so a blocked account
+                // can be answered without a second query — see the check
+                // right after the password is verified.
                 $stmt = $pdo->prepare(
                     'SELECT id, user_id, full_name, email, phone, date_of_birth,
-                            password_hash, is_verified, mfa_enabled
+                            password_hash, is_verified, mfa_enabled,
+                            status, blocked_reason
                      FROM users
                      WHERE email = :identifier OR phone = :identifier
                      LIMIT 1'
@@ -854,6 +872,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // none of them should leave the user sitting in a
                     // backoff.
                     login_throttle_clear($pdo, $identifier);
+
+                    // ---- A blocked account stops here ----------------
+                    // Deliberately AFTER the password check: refusing
+                    // earlier would turn this form into a way to test
+                    // whether an address has an account at all. Nothing
+                    // is emailed and no session is created — this is the
+                    // end of the line for a closed account. The reason
+                    // the admin recorded travels in the session rather
+                    // than the URL, so only the person who just proved
+                    // the password reads it.
+                    if (isla_account_blocked($user)) {
+                        $_SESSION['login_blocked_reason'] = trim((string) ($user['blocked_reason'] ?? ''));
+                        header('Location: ' . sid_append('login.php?blocked=1'));
+                        exit;
+                    }
 
                     // ---- Account must be email-verified first -------
                     if ((int) $user['is_verified'] !== 1) {
@@ -1027,7 +1060,7 @@ include __DIR__ . '/../include/head_meta.php';
     <!-- Strength meter for the password fields on this page
          (sign-up + reset). Purely a hint: the server still owns
          the real password policy. -->
-    <script src="password_strength.js"></script>
+    <script src="<?php echo asset_url('password_strength.js'); ?>"></script>
 </head>
 <body>
     <section class="auth-section">
@@ -1053,6 +1086,21 @@ include __DIR__ . '/../include/head_meta.php';
             <!-- Neutral confirmation after the user deleted their account -->
             <?php if ($justDeleted): ?>
                 <div class="alert alert-info" role="status">Your islaFIND account was deleted. Thanks for being part of the island.</div>
+            <?php endif; ?>
+
+            <!-- A closed account: either a live session that was cut off
+                 on its next request, or a sign-in that proved the
+                 password and found the account blocked. The reason is
+                 printed only in the second case, because only then did
+                 this session prove who it is. -->
+            <?php if ($justBlocked): ?>
+                <div class="alert alert-error" role="alert">
+                    This account has been blocked.
+                    <?php if ($blockedReason !== ''): ?>
+                        Reason recorded: <?php echo e($blockedReason); ?>
+                    <?php endif; ?>
+                    If you think this is a mistake, contact islaFIND support.
+                </div>
             <?php endif; ?>
 
             <!-- ====================================================

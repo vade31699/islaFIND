@@ -24,8 +24,9 @@
 -- column to a table that is already there (CREATE TABLE IF NOT EXISTS
 -- is a no-op). Columns added to `providers` after a database was built
 -- — profile_picture, profile_code, status, blocked_at, blocked_reason
--- — are applied automatically by isla_ensure_schema() in include/db.php
--- on the next request, so nothing has to be run by hand.
+-- — and the account-level ones on `users` (status, blocked_at,
+-- blocked_reason) are applied automatically by isla_ensure_schema() in
+-- include/db.php on the next request, so nothing has to be run by hand.
 -- ============================================================
 
 -- Create the database if it does not already exist.
@@ -63,8 +64,12 @@ CREATE TABLE IF NOT EXISTS users (
     is_verified       TINYINT(1)      NOT NULL DEFAULT 0,       -- e-mail confirmed?
     verification_code VARCHAR(10)     NULL,                     -- pending 6-digit code
     mfa_enabled       TINYINT(1)      NOT NULL DEFAULT 0,       -- MFA on login?
+    status            VARCHAR(20)     NOT NULL DEFAULT 'active', -- 'active' | 'blocked'
+    blocked_at        TIMESTAMP       NULL DEFAULT NULL,        -- when an admin blocked it
+    blocked_reason    VARCHAR(255)    NULL DEFAULT NULL,        -- why, in the admin's words
     created_at        TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
+    PRIMARY KEY (id),
+    KEY idx_users_status (status)
 ) ENGINE = InnoDB;
 
 -- ============================================================

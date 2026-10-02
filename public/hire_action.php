@@ -26,6 +26,7 @@ if (!isset($_SESSION['user_id'])) {
 
 // --- 3. Database connection ------------------------------------
 require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/listing_visibility.php';
 
 // --- 4. Load the current user ----------------------------------
 $stmt = $pdo->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');
@@ -114,11 +115,18 @@ if ($action === 'hire') {
         $stmt->execute([':p' => $providerId, ':c' => $myId]);
         $listingId = (int) $stmt->fetchColumn();
         if ($listingId === 0) {
+            // A job is pinned to the exact listing hired, so that
+            // listing has to be one members can still see: its own
+            // status AND its owner's account status, both of which the
+            // helper folds in (include/listing_visibility.php). Hires
+            // against a blocked account would otherwise keep landing
+            // in a queue nobody can answer.
             $stmt = $pdo->prepare(
-                "SELECT id FROM providers
-                 WHERE user_id = :uid AND profile_type = 'individual'
-                   AND status = 'active'
-                 ORDER BY id DESC LIMIT 1"
+                "SELECT p.id FROM providers p
+                 " . isla_listing_live_join() . "
+                 WHERE p.user_id = :uid AND p.profile_type = 'individual'
+                   AND " . isla_listing_live_where() . "
+                 ORDER BY p.id DESC LIMIT 1"
             );
             $stmt->execute([':uid' => $providerId]);
             $listingId = (int) $stmt->fetchColumn();

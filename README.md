@@ -58,6 +58,14 @@ hand-written JavaScript files.
   and its deep link stops resolving — to a member it is indistinguishable from
   a listing that never existed. Its **owner** still sees it, with the reason,
   so they can fix it and ask for a review.
+- **Blocking an ACCOUNT closes the person, not the page.** The queue lists the
+  owner of every reported listing, and both that row and the report page can
+  block the owner instead of the listing: the sign-in is refused, any session
+  they have open is dropped on its next request, and every listing they own
+  leaves the app — from
+  one flag on `users`, with no listing row touched, so unblocking restores all
+  of them exactly as they were. Reports open against that owner are resolved
+  with the reason attached.
 - **A separate superadmin identity.** `admins` is not a kind of user: it has
   its own table, its own session key and its own login branch, and no member
   page can reach it.
@@ -181,7 +189,7 @@ The repository is split so that **only `public/` is ever served**:
 | Folder | Holds | Web-reachable? |
 | ------ | ----- | -------------- |
 | `public/` | The document root: every page (`index.php`, `login.php`, `dashboard.php`, `messenger.php`, `create_profile.php`, `404.php`), every POST handler and JSON endpoint, plus `style.css`, the hand-written `.js` files, `img/`, `uploads/`, `manifest.webmanifest`, `robots.txt` and the `.htaccess` that hardens the web root. | Yes — this is the document root |
-| `include/` | The shared PHP includes: `db.php`, `env.php`, `security.php`, `categories.php`, `mailer.php`, `head_meta.php`, `notifications_bell.php`. Pages reach them with `require_once __DIR__ . '/../include/x.php'`. | No |
+| `include/` | The shared PHP includes: `db.php`, `env.php`, `security.php`, `categories.php`, `mailer.php`, `assets.php`, `head_meta.php`, `notifications_bell.php`. Pages reach them with `require_once __DIR__ . '/../include/x.php'`. | No |
 | project root | Configuration and tooling that must never be fetched: `.env`, `certs/`, `composer.json`/`composer.lock`, `vendor/`, `final_app.sql`, the three smoke tests, the `tools/` CLI and the CLI-only developer utilities. | No |
 
 That split is what keeps the credentials in `.env` (and the CA
@@ -252,7 +260,8 @@ host (Docker, CI, production) can override any key without touching the file.
 | `public/report_listing.php` | Files a listing report: a whitelisted reason, an optional note and an optional JPG/PNG screenshot. |
 | `public/admin/index.php` | The superadmin panel: overview, the report queue, and one report in full. One shell, three views. |
 | `public/admin/views/` | The three panel bodies, split out of `index.php` so the shell (guard, data, sidebar) is not repeated: `overview.php` (counts + newest reports), `reports.php` (the filterable queue), `report.php` (one report, the listing, the actions). |
-| `public/admin.css` | The panel's own stylesheet, loaded after `style.css`. Every rule is namespaced `.adm-*`, and the block below re-scopes the shared `.btn` / `.field-*` controls for a desktop panel. |
+| `public/admin.css` | The panel's own stylesheet, loaded after `style.css`. Every rule is namespaced `.adm-*`, and the block below re-scopes the shared `.btn` / `.field-*` controls for a desktop panel. Below 860px the sidebar collapses into the member app's menu: a round header button opening a full-screen card of section rows that slides open on the member app's own 0.45s easing, with the page content fading out beneath it. Both admin pages link it through `admin_asset_url()`, which appends the file's mtime (`?v=…`) so a phone that cached an older panel cannot keep rendering a layout that has since been replaced. |
+| `public/admin_nav.js` | The collapsed admin menu's memory and manners: remembers an opened hamburger across reloads, and folds it again on a section link, on sign-out, on a tap outside the sidebar or on Escape. Purely an enhancement — the checkbox in the markup toggles the menu without it. Loaded through `admin_asset_url()` like `admin.css`, so the two admin assets share one cache-busting rule. |
 | `public/admin/settings.php` | The admin's own email, password and two-factor setting. |
 | `public/admin/action.php` | Every moderation decision (block, unblock, resolve, dismiss) — POST + CSRF. |
 | `public/admin/logout.php` | Ends an admin session (POST, like every other state change). |
@@ -278,15 +287,22 @@ a connection — shared with the session store) · `env.php` (.env loader) ·
 seam for the account avatar and listing pictures) · `categories.php` (types,
 categories, barangays, map centres) · `mailer.php` · `admin_auth.php` (superadmin
 identity, email-code challenges and guards — separate from member identity on
-purpose) · `reporting.php` (report reasons, IslaProfile IDs) · `head_meta.php` (shared
-`<head>`) · `notifications_bell.php`
+purpose) · `reporting.php` (report reasons, IslaProfile IDs) · `assets.php` (the
+`?v=<mtime>` cache-busting stamp shared by the member app's `asset_url()` and the
+panel's `admin_asset_url()`) · `head_meta.php` (shared
+`<head>`) · `notifications_bell.php` · `member_guard.php` (a blocked account
+loses its session on the next request — called from `db.php`, the one include
+with a connection) · `listing_visibility.php` (the one place that says which
+listings members may discover: the listing's own status *and* its owner's)
 
 **Web root, configuration and assets** (in `public/`) — `.htaccess` (branded
 404, hardening headers, compression) · `manifest.webmanifest` (installable
 app) · `robots.txt` · `style.css` · `busy.js` (loading states) ·
 `profile_script.js` · `maps_pinning.js` · `messenger.js` ·
 `messenger_live.js` · `notifications.js` · `message_delete.js` ·
-`password_strength.js` · `img/` · `uploads/`
+`password_strength.js` · `img/` · `uploads/` — the stylesheet and scripts are
+linked through `asset_url()` (see `include/assets.php`), so each carries a
+`?v=<mtime>` stamp that changes only when the file does.
 
 **Project root** — `.htaccess` (forwards local requests into `public/`) ·
 `.gitignore` · `.gitattributes` · `composer.json` / `composer.lock` ·
@@ -577,6 +593,14 @@ Implemented everywhere, not per page:
   requires the current password. Email-change and sign-in codes live in
   separate session channels, so a code that arrived to sign in can never be
   replayed to rewrite the account.
+- **A blocked account is closed at the door, not just hidden.** The sign-in is
+  refused *after* the password is proved, so the form never tells a stranger
+  which addresses exist, and it says why in the words the admin recorded. A
+  session already open is cut on its next request (the check lives in
+  `db.php`, which every authenticated page reaches, rather than in the twenty
+  hand-written session guards it would otherwise have to be repeated in) — and
+  because nothing is written to the account except its own status flag, a
+  restore brings every listing and its history back untouched.
 - **A blocked listing is unreachable, not just unlisted.** It is filtered out of
   every public read *and* every public write, so it cannot be saved, messaged
   about, hired or view-tracked — while its owner keeps full control of it and
@@ -606,9 +630,9 @@ Deliberately **not** done yet:
 
 | Table | Holds |
 | ----- | ----- |
-| `users` | Accounts: names, unique email/phone, DOB (18+ check), password hash, avatar path, verification + MFA flags. |
+| `users` | Accounts: names, unique email/phone, DOB (18+ check), password hash, avatar path, verification + MFA flags. Also `status` (`active` / `blocked`) with `blocked_at` + `blocked_reason`: the account-level block an admin can set from the report queue. A blocked account cannot sign in, loses any open session on its next request, and its listings stop being discoverable — the listings themselves are never modified, so unblocking restores all of them. |
 | `user_devices` | Trusted sessions shown in Device Logins (no FK, so the delete-account flow clears it by hand). |
-| `providers` | islaFIND listings: type, title, address, map pin, description or unit count, the listing's own picture (`profile_picture`, nullable — `NULL` means "use the owner's account avatar"), rating aggregates, view/interaction counts. Also `profile_code` (the `ISLA-000123` reference an admin uses to talk about a listing, unique, assigned on save) and `status` (`active` / `blocked`) with `blocked_at` + `blocked_reason`. Every public query filters `status = 'active'`; the owner's own panels deliberately do not. |
+| `providers` | islaFIND listings: type, title, address, map pin, description or unit count, the listing's own picture (`profile_picture`, nullable — `NULL` means "use the owner's account avatar"), rating aggregates, view/interaction counts. Also `profile_code` (the `ISLA-000123` reference an admin uses to talk about a listing, unique, assigned on save) and `status` (`active` / `blocked`) with `blocked_at` + `blocked_reason`. Every public query filters `status = 'active'` **and the owner's `status`** (see `include/listing_visibility.php`); the owner's own panels deliberately do not. |
 | `profile_reports` | One row per listing report: which listing, who filed it, the `reason_code`, their note, an optional `evidence_image`, the state (`pending` / `resolved` / `dismissed`), the admin's note, whether the listing was blocked as a result, and who decided. One open report per member per listing is enforced by a partial unique index. |
 | `admins` | Superadmin accounts — deliberately NOT a kind of member: their own table, so no member query or member session can reach them. Unique email, bcrypt hash, display name, MFA flag, active flag, last login (time + IP). Rows are created from the server with `tools/create_admin.php`, never by a web form. |
 | `provider_album_images` | A business listing's extra photos: `provider_id`, the stored filename, its `sort_order`, and when it was added. Up to `ISLA_ALBUM_MAX_PHOTOS` (5) per listing, deleted with the listing by its foreign key. Created at runtime by `db.php` if missing. |

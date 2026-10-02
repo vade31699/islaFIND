@@ -259,11 +259,27 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
     <title><?php echo e($pageTitle . ' · islaFIND Admin'); ?></title>
-    <link rel="stylesheet" href="../style.css">
-    <link rel="stylesheet" href="../admin.css">
+    <link rel="stylesheet" href="<?php echo e(admin_asset_url('../style.css')); ?>">
+    <link rel="stylesheet" href="<?php echo e(admin_asset_url('../admin.css')); ?>">
 </head>
 <body>
 <div class="adm">
+
+    <!-- Below 860px this checkbox folds the sections, the account row and
+         the sign-out button behind the hamburger — the round header
+         button, and the card of rows, the member app uses for the same
+         job — and stands the page content down while it is open. That is
+         what opening the menu does in the member app: the menu takes the
+         screen, not a slice of it.
+
+         It sits out here, in front of both columns, rather than inside
+         the sidebar, because a checked box can only style what comes
+         after it — and this one has to reach the sidebar (what unfolds)
+         as well as the main column (what gets out of the way). A
+         checkbox rather than a script keeps the panel working with
+         JavaScript off, which matters for a moderation tool an operator
+         may open on a locked-down machine. -->
+    <input type="checkbox" id="adm-menu" class="adm-menu-toggle">
 
     <!-- ============ Sidebar ============ -->
     <aside class="adm-side">
@@ -273,35 +289,52 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
                 <strong>islaFIND</strong>
                 <span>Superadmin</span>
             </div>
+            <label class="adm-burger" for="adm-menu">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <span class="adm-burger-text">Menu</span>
+            </label>
         </div>
 
-        <nav class="adm-nav" aria-label="Admin sections">
-            <a class="adm-nav-link" href="index.php">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
-                Overview
-            </a>
-            <a class="adm-nav-link" href="index.php?view=reports&amp;status=pending">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                Reports
-            </a>
-            <a class="adm-nav-link is-active" href="settings.php">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A2.65 2.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A2.65 2.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A2.65 2.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a2.65 2.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                Settings
-            </a>
-        </nav>
+        <!-- Everything the hamburger folds: the sections, then the
+             account row and the sign-out button. On a phone this is
+             one card of rows, like the member app's menu.
+             The inner div is the card's single grid item, which is
+             what lets the animation below reveal it from nothing
+             without a guessed max-height. -->
+        <div class="adm-hub">
+            <div class="adm-hub-inner">
+                <nav class="adm-nav" aria-label="Admin sections">
+                    <a class="adm-nav-link" href="index.php">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+                        <span class="adm-nav-label">Overview</span>
+                        <span class="adm-nav-go" aria-hidden="true">&#8250;</span>
+                    </a>
+                    <a class="adm-nav-link" href="index.php?view=reports&amp;status=pending">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        <span class="adm-nav-label">Reports</span>
+                        <span class="adm-nav-go" aria-hidden="true">&#8250;</span>
+                    </a>
+                    <a class="adm-nav-link is-active" href="settings.php">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A2.65 2.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A2.65 2.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A2.65 2.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a2.65 2.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0 .33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        <span class="adm-nav-label">Settings</span>
+                        <span class="adm-nav-go" aria-hidden="true">&#8250;</span>
+                    </a>
+                </nav>
 
-        <div class="adm-side-foot">
-            <div class="adm-who">
-                <div class="adm-who-avatar"><?php echo e(strtoupper(substr((string) ($admin['full_name'] ?: $admin['email']), 0, 1))); ?></div>
-                <div class="adm-who-text">
-                    <strong><?php echo e($admin['full_name'] ?: 'Superadmin'); ?></strong>
-                    <span><?php echo e($admin['email']); ?></span>
+                <div class="adm-side-foot">
+                    <div class="adm-who">
+                        <div class="adm-who-avatar"><?php echo e(strtoupper(substr((string) ($admin['full_name'] ?: $admin['email']), 0, 1))); ?></div>
+                        <div class="adm-who-text">
+                            <strong><?php echo e($admin['full_name'] ?: 'Superadmin'); ?></strong>
+                            <span><?php echo e($admin['email']); ?></span>
+                        </div>
+                    </div>
+                    <form action="logout.php" method="POST">
+                        <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
+                        <button type="submit" class="btn btn-outline btn-block btn-small">Sign out</button>
+                    </form>
                 </div>
             </div>
-            <form action="logout.php" method="POST">
-                <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
-                <button type="submit" class="btn btn-outline btn-block btn-small">Sign out</button>
-            </form>
         </div>
     </aside>
 
@@ -514,5 +547,6 @@ $pageSubtitle  = 'Your admin email, password and sign-in security.';
         </div>
     </main>
 </div>
+<script src="<?php echo e(admin_asset_url('../admin_nav.js')); ?>"></script>
 </body>
 </html>

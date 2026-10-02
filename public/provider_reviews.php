@@ -26,6 +26,7 @@ if (!isset($_SESSION['user_id'])) {
 
 // --- 3. Database connection -------------------------------------
 require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/listing_visibility.php';
 
 // --- 4. Read + validate the provider id -------------------------
 $providerId = (int) ($_GET['provider_id'] ?? 0);
@@ -36,7 +37,15 @@ if ($providerId <= 0) {
 }
 
 // --- 5. Load the listing (must exist) ---------------------------
-  $stmt = $pdo->prepare('SELECT id, profile_type, name, selected_title FROM providers WHERE id = :id AND status = \'active\' LIMIT 1');
+  // Qualify every column and filter with isla_listing_live_where(): the
+  // JOIN brings the owner in, and a listing whose OWNER is blocked must
+  // read as "not found" here exactly as it does in the feed.
+  $stmt = $pdo->prepare(
+      'SELECT p.id, p.profile_type, p.name, p.selected_title
+         FROM providers p
+         ' . isla_listing_live_join() . '
+        WHERE p.id = :id AND ' . isla_listing_live_where() . ' LIMIT 1'
+  );
 $stmt->execute([':id' => $providerId]);
 $provider = $stmt->fetch();
 

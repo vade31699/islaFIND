@@ -31,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 
 // --- 4. Database connection ------------------------------------
 require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/listing_visibility.php';
 
 // --- 5. Collect + validate the fields ---------------------------
 $providerId = (int) ($_POST['provider_id'] ?? 0);
@@ -51,7 +52,16 @@ if ($providerId <= 0) {
     // profile_type is read too: the contract row below is only
     // created for INDIVIDUAL SKILLS listings — business listings are
     // inquired/chatted with but never enter the hire -> rating chain.
-    $stmt = $pdo->prepare('SELECT id, user_id, name, profile_type FROM providers WHERE id = :id AND status = \'active\' LIMIT 1');
+    // Filters on the OWNER's account status as well as the listing's own
+    // (include/listing_visibility.php): a new inquiry must not land on an
+    // account an admin has blocked, because nobody will answer it. The
+    // same rule the feed, hiring and reporting already apply.
+    $stmt = $pdo->prepare(
+        'SELECT p.id, p.user_id, p.name, p.profile_type
+           FROM providers p
+           ' . isla_listing_live_join() . '
+          WHERE p.id = :id AND ' . isla_listing_live_where() . ' LIMIT 1'
+    );
     $stmt->execute([':id' => $providerId]);
     $provider = $stmt->fetch();
 

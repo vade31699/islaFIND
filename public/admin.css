@@ -223,6 +223,66 @@
     text-overflow: ellipsis;
 }
 
+/* --- 1a. Menu toggle ---------------------------------------
+   Below 860px the sidebar becomes a top bar, and three sections plus
+   the account row and a sign-out button is far more chrome than a
+   phone screen wants. The bar therefore keeps only the brand and a
+   hamburger, and the rest unfolds from it when tapped.
+
+   It unfolds into the member app's menu: a round button at the right
+   of the header, opening a card of rows — icon, name, chevron — with
+   the account and sign-out closing it at the bottom. Same shape for
+   the same job, so an admin who is also a member is not learning a
+   second menu.
+
+   The state lives in a checkbox so the toggle needs no JavaScript:
+   the checkbox itself is invisible, the hamburger is its <label>,
+   and `:checked` drives the unfolding down in section 8. */
+.adm-menu-toggle {
+    display: none;      /* desktop has room for the full sidebar */
+}
+
+.adm-burger {
+    display: none;
+}
+
+.adm-burger-text {
+    /* The icon carries the meaning; this text is for screen readers. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* The `›` on each phone row. It belongs to the collapsed menu only. */
+.adm-nav-go {
+    display: none;
+}
+
+/* Sections + account + sign-out as one block, so the phone layout can
+   fold, and slide, all of it at once. A flex column keeps the desktop
+   sidebar exactly as it was: the nav stretches and scrolls inside the
+   sticky bar, the footer stays pinned to the bottom. */
+.adm-hub {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* The card's single grid item down in section 8, and the element that
+   slides: a grid row can only animate to a height it holds one item
+   for, and one flex chain here keeps both layouts identical. */
+.adm-hub-inner {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 /* --- 1b. Main column --------------------------------------- */
 .adm-main {
     flex: 1 1 auto;
@@ -638,6 +698,29 @@
     text-align: right;
 }
 
+/* A queue row now holds more than the link into the report: the account
+   behind it can be blocked (or restored) from the row itself. The two
+   stack against the right edge so the decision the admin came to make
+   is readable without opening the report first. */
+.adm-row-actions {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+/* Lift just the block/restore button above the row-wide Open overlay
+   (see .adm-rowlink::after). The overlay is a positioned element, so it
+   paints over static content; the form is positioned for the same
+   reason and, coming later in the DOM, wins the tap on its own box —
+   the rest of the row still opens the report. Deliberately NOT on the
+   container: positioning that would make it the overlay's containing
+   block and shrink the row-wide target to this one cell. */
+.adm-row-actions form {
+    position: relative;
+    z-index: 1;
+}
+
 .adm-ref {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12.5px;
@@ -883,15 +966,15 @@
    8. Narrow screens
    ------------------------------------------------------------ */
 @media (max-width: 1024px) {
-    /* The queue is seven columns wide. Rather than let the table
+    /* The queue is eight columns wide. Rather than let the table
        scroll sideways on a tablet, drop the two least load-bearing
-       columns: "Reported by" and "Listing state" are both visible
-       again on the report page, and the reason + age still identify
-       the row. */
-    .adm-table th:nth-child(4),
-    .adm-table td:nth-child(4),
+       columns: "Listing state" and "Reported by" are both visible
+       again on the report page, and the listing, its owner, the reason
+       and the age still identify the row. */
     .adm-table th:nth-child(5),
-    .adm-table td:nth-child(5) {
+    .adm-table td:nth-child(5),
+    .adm-table th:nth-child(6),
+    .adm-table td:nth-child(6) {
         display: none;
     }
 }
@@ -899,40 +982,273 @@
 @media (max-width: 860px) {
     .adm {
         display: block;
+        /* relative, not static: the menu checkbox is positioned against
+           this shell, and it lands on the hamburger because the bar is
+           the top of the shell. */
+        position: relative;
+        /* The bar the menu card hangs from, which is the brand row's own
+           height: 12px + 12px of padding around the 38px control.
+           The card and the content that stands down for it are both
+           measured against this, so a change to .adm-brand's padding
+           has to be mirrored here. */
+        --adm-bar-h: 62px;
+    }
+
+    /* Opening the menu takes the whole screen, the way it does in the
+       member app: the sections, the account row and the sign-out card
+       stand in for the page rather than being read alongside it.
+
+       The content fades rather than blinking away, and while it is gone
+       it is taken out of the flow, so the shell is exactly one viewport
+       — nothing left below the card to scroll to, and nothing behind it
+       for a stray tap to land on. `visibility`, delayed until the fade
+       has finished, is what takes the links and buttons out of the tab
+       order too, and the max-height keeps the faded page from adding
+       scrollable height of its own. */
+    .adm-main {
+        transition: opacity .3s ease;
+    }
+
+    .adm-menu-toggle:checked ~ .adm-main {
+        position: absolute;
+        top: var(--adm-bar-h);
+        left: 0;
+        right: 0;
+        max-height: calc(100vh - var(--adm-bar-h));
+        max-height: calc(100dvh - var(--adm-bar-h));
+        overflow: hidden;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity .3s ease, visibility 0s linear .3s;
     }
 
     .adm-side {
         width: auto;
         flex: none;
         height: auto;
-        position: static;
-        border-bottom: 1px solid rgba(255, 255, 255, .08);
+        border-bottom: 0;
     }
 
     .adm-brand {
-        border-bottom-color: rgba(255, 255, 255, .07);
+        padding: 12px 16px;
+        border-bottom: 0;
     }
 
+    /* Invisible but still focusable, so a keyboard can open the menu
+       with the space bar exactly like a tap. It sits under the
+       hamburger, which is pinned to the right of the bar. */
+    .adm-menu-toggle {
+        display: block;
+        position: absolute;
+        top: 12px;
+        right: 16px;
+        width: 38px;
+        height: 38px;
+        margin: 0;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    /* The member app's header menu button: a round translucent icon at
+       the far right of the bar, not a square block. */
+    .adm-burger {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        margin-left: auto;      /* far right, after the brand */
+        border-radius: 50%;
+        background: rgba(255, 255, 255, .15);
+        color: #fff;
+        cursor: pointer;
+        flex: 0 0 auto;
+        transition: background-color .2s;
+    }
+
+    .adm-burger:hover {
+        background: rgba(255, 255, 255, .3);
+    }
+
+    .adm-burger svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    /* Focus sits on the invisible checkbox, so mirror it on the icon. */
+    .adm-menu-toggle:focus-visible ~ .adm-side .adm-brand .adm-burger {
+        outline: 2px solid #7dd3fc;
+        outline-offset: 2px;
+    }
+
+    /* The card the hamburger opens, inset from the edges and shadowed
+       the way the member menu's card sits in the page rather than
+       bleeding to its sides — and, because it is the only thing on that
+       screen, it runs the whole way down to the bottom of the viewport.
+
+       It arrives the way the member app's panel slider does — same
+       0.45s cubic-bezier(.4, 0, .2, 1), the rows sliding in as the card
+       opens — so the two menus feel like one app.
+
+       Both ends of the height are spelled out on purpose: a card that
+       animated to `auto` would have to be measured in JavaScript, and
+       this menu opens without it. `--adm-bar-h` is the bar it hangs
+       from and the 14px is the page gap under it. `opacity` covers the
+       one thing a zero-height card still paints, its own shadow, and
+       `visibility` keeps the folded rows out of the tab order — a
+       height of zero hides them from the eye, not from the keyboard. */
+    .adm-hub {
+        height: 0;
+        margin: 0 12px;
+        background: #fff;
+        border-radius: 18px;
+        overflow: hidden;       /* rows clip to the rounded corners */
+        box-shadow: 0 10px 30px rgba(0, 0, 0, .10);
+        opacity: 0;
+        visibility: hidden;
+        transition: height .45s cubic-bezier(.4, 0, .2, 1),
+                    margin-bottom .45s cubic-bezier(.4, 0, .2, 1),
+                    opacity .45s cubic-bezier(.4, 0, .2, 1),
+                    visibility 0s linear .45s;   /* hide once it has shut */
+    }
+
+    .adm-hub-inner {
+        /* The card's full open height: the account row and the sign-out
+           button ride its bottom edge down as it opens, the way the
+           member menu's log-out sits at the bottom of its card. */
+        height: 100%;
+        transform: translateX(18px);
+        transition: transform .45s cubic-bezier(.4, 0, .2, 1);
+    }
+
+    .adm-menu-toggle:checked ~ .adm-side .adm-hub {
+        height: calc(100vh - var(--adm-bar-h) - 14px);   /* pre-dvh */
+        height: calc(100dvh - var(--adm-bar-h) - 14px);
+        margin-bottom: 14px;
+        opacity: 1;
+        visibility: visible;
+        transition: height .45s cubic-bezier(.4, 0, .2, 1),
+                    margin-bottom .45s cubic-bezier(.4, 0, .2, 1),
+                    opacity .45s cubic-bezier(.4, 0, .2, 1),
+                    visibility 0s linear 0s;     /* visible while opening */
+    }
+
+    .adm-menu-toggle:checked ~ .adm-side .adm-hub .adm-hub-inner {
+        transform: none;
+    }
+
+    /* One section per row, each as tall as a thumb: icon, name,
+       chevron. The member menu's rows, in the panel's own teal.
+
+       The list does NOT stretch here. It does on the desktop sidebar,
+       where growing is what pins the footer to the bottom of a 100vh
+       column — but in the full-height menu card that same growth is
+       what pushed the account row and the sign-out button down to the
+       bottom edge and left a dead white field in the middle. They
+       belong directly under the sections they follow, the way the
+       member menu's log-out follows its last row.
+
+       Shrinking is still allowed (flex-shrink: 1 with min-height: 0),
+       so a short screen — a landscape phone, mostly — gives way to the
+       account row and the button instead of pushing them off the card:
+       the rows scroll inside the list, and the bottom of the menu stays
+       where a thumb expects it. */
     .adm-nav {
-        flex-direction: row;
-        flex-wrap: wrap;
-        padding: 10px 12px;
+        flex: 0 1 auto;
+        padding: 6px 16px;
+        min-height: 0;
+    }
+
+    .adm-nav-link {
+        gap: 12px;
+        padding: 14px 6px;
+        border: 0;
+        border-bottom: 1px solid #f0f2f1;
+        border-radius: 0;
+        color: #333;
+        font-size: 15px;
+        font-weight: 500;
+        transition: color .2s;
+    }
+
+    .adm-nav-link:hover {
+        background: none;
+        color: var(--primary);
+    }
+
+    /* The current section is marked by its colour here, not by the
+       tinted slab the desktop sidebar uses — there is no slab to tint
+       in a list of rows. */
+    .adm-nav-link.is-active {
+        background: none;
+        border-color: #f0f2f1;
+        color: var(--primary);
+        font-weight: 700;
+    }
+
+    .adm-nav-link svg {
+        width: 22px;
+        height: 22px;
+        color: var(--primary);
+        opacity: 1;
+    }
+
+    .adm-nav-label {
+        flex: 1;                /* pushes the count and chevron right */
+    }
+
+    .adm-nav-go {
+        display: block;
+        color: #bbb;
+        font-size: 20px;
+        line-height: 1;
     }
 
     .adm-nav-count {
         margin-left: 0;
     }
 
+    /* The account row and sign-out close the same card under a
+       divider, which is where the member app puts its log-out. */
     .adm-side-foot {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        border-top-color: rgba(255, 255, 255, .07);
+        padding: 14px 22px 18px;
+        border-top: 1px solid #f0f2f1;
     }
 
     .adm-who {
-        margin-bottom: 0;
-        flex: 1 1 auto;
+        margin-bottom: 12px;
+    }
+
+    /* The identity row sits on white now, so it takes the panel's
+       light-theme ink instead of the sidebar's light-on-dark. */
+    .adm-who-avatar {
+        background: rgba(0, 119, 182, .12);
+        color: var(--primary);
+    }
+
+    .adm-who-text strong {
+        color: var(--adm-ink);
+    }
+
+    .adm-who-text span {
+        color: var(--adm-muted);
+    }
+
+    /* Sign out wears the app's danger colours here and gets the same
+       thumb-sized target as the rows above it. Same palette as
+       .adm .btn-danger, which the desktop sidebar button deliberately
+       does not use. */
+    .adm-side-foot .btn {
+        padding: 12px 16px;
+        font-size: 14px;
+        font-weight: 700;
+        color: #b91c1c;
+        border-color: #fca5a5;
+    }
+
+    .adm-side-foot .btn:hover {
+        background: #b91c1c;
+        border-color: #b91c1c;
+        color: #fff;
     }
 
     .adm-top {
