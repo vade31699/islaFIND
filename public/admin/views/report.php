@@ -52,7 +52,6 @@ foreach ($ownerOther as $other) {
     <div class="adm-panel-head">
         <div>
             <h2><?php echo e($reasonLabel); ?></h2>
-            <p>Report #<?php echo $reportId; ?> · filed <?php echo e(adm_time_ago((string) $report['created_at'])); ?></p>
         </div>
         <div class="adm-panel-head-actions">
             <?php if ($isPending): ?>
@@ -186,7 +185,6 @@ foreach ($ownerOther as $other) {
                         <a href="<?php echo e(adm_upload_url($evidence)); ?>" target="_blank" rel="noopener noreferrer">
                             <img src="<?php echo e(adm_upload_url($evidence)); ?>" alt="Evidence screenshot supplied with this report">
                         </a>
-                        <figcaption>Evidence uploaded by the member.</figcaption>
                     </figure>
                 <?php endif; ?>
             </div>
@@ -214,7 +212,6 @@ foreach ($ownerOther as $other) {
             </div>
             <div class="adm-actions-row is-spaced">
                 <button type="submit" class="btn btn-danger btn-small">Block this listing</button>
-                <span class="adm-secondary">Resolves every open report on it.</span>
             </div>
         </form>
         <?php elseif ($listing !== null && $isBlocked): ?>
@@ -225,7 +222,6 @@ foreach ($ownerOther as $other) {
             <input type="hidden" name="provider_id" value="<?php echo $providerId; ?>">
             <div class="adm-actions-row">
                 <button type="submit" class="btn btn-small">Unblock this listing</button>
-                <span class="adm-secondary">It returns to the feed and search at once.</span>
             </div>
         </form>
         <?php endif; ?>

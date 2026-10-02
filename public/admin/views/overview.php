@@ -27,9 +27,6 @@ $statActive   = max(0, $statListings - $statBlocked);
             </div>
         </div>
         <div class="adm-stat-value"><?php echo $statPending; ?></div>
-        <div class="adm-stat-hint">
-            <?php echo $statPending === 0 ? 'The queue is clear.' : 'Reports members have filed'; ?>
-        </div>
     </a>
 
     <div class="adm-stat">
@@ -40,7 +37,6 @@ $statActive   = max(0, $statListings - $statBlocked);
             </div>
         </div>
         <div class="adm-stat-value"><?php echo $statLast24; ?></div>
-        <div class="adm-stat-hint"><?php echo $statTotalRep; ?> report<?php echo $statTotalRep === 1 ? '' : 's'; ?> in total</div>
     </div>
 
     <div class="adm-stat">
@@ -51,7 +47,6 @@ $statActive   = max(0, $statListings - $statBlocked);
             </div>
         </div>
         <div class="adm-stat-value"><?php echo $statResolv7; ?></div>
-        <div class="adm-stat-hint"><?php echo $statDismiss; ?> dismissed overall</div>
     </div>
 
     <div class="adm-stat">
@@ -62,7 +57,6 @@ $statActive   = max(0, $statListings - $statBlocked);
             </div>
         </div>
         <div class="adm-stat-value"><?php echo $statBlocked; ?></div>
-        <div class="adm-stat-hint">Hidden from every part of the app</div>
     </div>
 
     <div class="adm-stat">
@@ -73,7 +67,6 @@ $statActive   = max(0, $statListings - $statBlocked);
             </div>
         </div>
         <div class="adm-stat-value"><?php echo $statActive; ?></div>
-        <div class="adm-stat-hint">of <?php echo $statListings; ?> total</div>
     </div>
 </div>
 
@@ -81,7 +74,6 @@ $statActive   = max(0, $statListings - $statBlocked);
     <div class="adm-panel-head">
         <div>
             <h2>Newest reports</h2>
-            <p>The five most recent reports still waiting on a decision.</p>
         </div>
         <div class="adm-panel-head-actions">
             <a class="btn btn-small btn-outline" href="index.php?view=reports&amp;status=pending">See all <?php echo $statPending; ?></a>

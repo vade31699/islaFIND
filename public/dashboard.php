@@ -1354,7 +1354,6 @@ include __DIR__ . '/../include/head_meta.php';
                     <div class="dash-panel" id="dashMenu">
 
                         <h4 class="sec-section">Settings</h4>
-                        <p class="sec-hint">Choose a section to manage your account.</p>
 
                         <ul class="menu-list">
                             <li>
@@ -1499,7 +1498,6 @@ include __DIR__ . '/../include/head_meta.php';
 
                         <button type="button" class="panel-back" data-go="menu">&#8592; Settings</button>
                         <h4 class="sec-section">islaFIND Profile</h4>
-                        <p class="sec-hint">List your service on the islaFIND directory so people on Bantayan Island can find and message you.</p>
 
                         <!-- Feedback banners -->
                         <?php if (isset($errors['isla'])): ?>
@@ -1783,10 +1781,6 @@ include __DIR__ . '/../include/head_meta.php';
                                                     This album is full at <?php echo ISLA_ALBUM_MAX_PHOTOS; ?> photos. Remove one to swap it.
                                                 </p>
                                             <?php endif; ?>
-                                            <p class="prov-album-hint">
-                                                JPG or PNG, up to 5&nbsp;MB each. Clients see these in the listing&rsquo;s
-                                                photo gallery.
-                                            </p>
                                         </div>
                                     <?php endif; ?>
 
@@ -1911,13 +1905,6 @@ include __DIR__ . '/../include/head_meta.php';
 
 <?php if ($pendingEmailChange === null): ?>
                             <!-- ===== Step 1: ask for the new address ===== -->
-                            <p class="sec-hint">
-                                Your email address is how you sign in, and where
-                                password resets and security codes are sent.
-                                We will email a 6-digit code to the new address
-                                to confirm you want it — nothing changes until
-                                you enter it.
-                            </p>
                             <form action="dashboard.php" method="POST" novalidate>
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <div class="form-group">
@@ -1948,12 +1935,6 @@ include __DIR__ . '/../include/head_meta.php';
                                  editable field: it lives in the session, and an
                                  editable copy is exactly how a code sent to one
                                  address ends up applied to another. -->
-                            <p class="sec-hint">
-                                Enter the 6-digit code we sent to
-                                <strong><?php echo $pendingEmailChangeMail; ?></strong>.
-                                Your sign-in address stays
-                                <strong><?php echo $email; ?></strong> until you do.
-                            </p>
                             <form action="dashboard.php" method="POST" novalidate>
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <div class="form-group">
@@ -2016,7 +1997,6 @@ include __DIR__ . '/../include/head_meta.php';
                         <div class="sec-block sec-view" id="mfaSec"<?php echo $securityView === 'mfaSec' ? '' : ' hidden'; ?>>
                             <button type="button" class="panel-back" data-sec-back>&#8592; Back to security options</button>
                             <h5>Multi-Factor Authentication (MFA)</h5>
-                            <p class="sec-hint">When enabled, logging in also asks for a one-time code emailed to your registered address.</p>
                             <?php if (isset($messages['mfa'])): ?>
                                 <p class="field-ok" role="status"><?php echo htmlspecialchars($messages['mfa']); ?></p>
                             <?php endif; ?>
@@ -2033,7 +2013,6 @@ include __DIR__ . '/../include/head_meta.php';
                         <div class="sec-block sec-view" id="devicesSec"<?php echo $securityView === 'devicesSec' ? '' : ' hidden'; ?>>
                             <button type="button" class="panel-back" data-sec-back>&#8592; Back to security options</button>
                             <h5>Device Logins</h5>
-                            <p class="sec-hint">Trusted devices with active sessions. Logout ends the session (device stays listed); Revoke removes the trusted device entirely.</p>
                             <?php if (isset($errors['devices'])): ?>
                                 <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['devices']); ?></p>
                             <?php endif; ?>
@@ -2100,7 +2079,6 @@ include __DIR__ . '/../include/head_meta.php';
 
                         <button type="button" class="panel-back" data-go="menu">&#8592; Settings</button>
                         <h4 class="sec-section">My Jobs</h4>
-                        <p class="sec-hint">Service contracts where you are the provider. Accept or decline hire requests, and mark jobs completed so the client can rate you.</p>
 
                         <?php if (isset($errors['isla'])): ?>
                             <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['isla']); ?></p>
@@ -2174,7 +2152,6 @@ include __DIR__ . '/../include/head_meta.php';
 
                         <button type="button" class="panel-back" data-go="menu">&#8592; Settings</button>
                         <h4 class="sec-section">Saved Listings</h4>
-                        <p class="sec-hint">Listings you saved while browsing. Tap the heart on any listing to keep it here.</p>
 
                         <?php if (isset($errors['saved'])): ?>
                             <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['saved']); ?></p>
@@ -2280,7 +2257,6 @@ include __DIR__ . '/../include/head_meta.php';
                                 </div>
                             <?php endforeach; ?>
 
-                            <p class="sec-hint" style="margin-top:14px">More listings? <a href="dashboard.php?tab=home#feedCatalogue">Browse all listings</a> and tap <strong>Save</strong> on anything you want to keep.</p>
                         <?php endif; ?>
 
                     </div>
@@ -2493,10 +2469,6 @@ include __DIR__ . '/../include/head_meta.php';
                 <strong id="rmListing">this listing</strong>
                 <span class="provider-badge" id="rmCategory" hidden></span>
             </p>
-            <p class="sec-hint">
-                Tell us what is wrong with it. An islaFIND
-                admin reviews every report. We never show your details to the listing owner.
-            </p>
 
             <form action="report_listing.php" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
@@ -2525,7 +2497,6 @@ include __DIR__ . '/../include/head_meta.php';
                 <div class="form-group">
                     <label class="field-label" for="rmEvidence">Add a screenshot <span class="field-counter">(optional)</span></label>
                     <input class="field-in" type="file" id="rmEvidence" name="evidence" accept="image/jpeg,image/png">
-                    <p class="sec-hint">JPG or PNG, up to 3 MB.</p>
                 </div>
 
                 <div class="modal-actions">

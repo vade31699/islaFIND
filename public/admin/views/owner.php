@@ -41,7 +41,6 @@ foreach ($ownerListings as $l) {
     <div class="adm-panel-head">
         <div>
             <h2><?php echo e((string) $ownerAccount['full_name']); ?></h2>
-            <p>Account #<?php echo $ownerId; ?> · member since <?php echo e(date('j M Y', (int) strtotime((string) $ownerAccount['created_at']))); ?></p>
         </div>
         <div class="adm-panel-head-actions">
             <?php if ($ownerBlocked): ?>

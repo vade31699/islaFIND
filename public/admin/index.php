@@ -390,27 +390,18 @@ if ($view === 'owner') {
 // ------------------------------------------------------------
 // 6. Page furniture
 // ------------------------------------------------------------
-$pageTitle    = 'Overview';
-$pageSubtitle = 'How islaFIND is doing right now.';
+$pageTitle = 'Overview';
 
 if ($view === 'reports') {
     if ($queueListing !== null) {
-        $pageTitle    = 'Reports on ' . adm_listing_title($queueListing);
-        $pageSubtitle = 'Every report filed against this listing.';
+        $pageTitle = 'Reports on ' . adm_listing_title($queueListing);
     } else {
-        $pageTitle    = 'Reported Listings';
-        $pageSubtitle = 'Everything members have reported, newest first.';
+        $pageTitle = 'Reported Listings';
     }
 } elseif ($view === 'report') {
-    $pageTitle    = 'Report #' . ($report !== null ? (int) $report['id'] : '');
-    $pageSubtitle = $report !== null
-        ? isla_report_reason_label((string) $report['reason_code'])
-        : 'That report could not be found.';
+    $pageTitle = 'Report #' . ($report !== null ? (int) $report['id'] : '');
 } elseif ($view === 'owner') {
-    $pageTitle    = 'Owner profile';
-    $pageSubtitle = $ownerAccount !== null
-        ? (string) $ownerAccount['full_name'] . ' — every listing under this account.'
-        : 'That account could not be found.';
+    $pageTitle = 'Owner profile';
 }
 
 // The nav item that should read as current.
@@ -535,7 +526,6 @@ if ($view === 'reports') {
             <?php endif; ?>
             <div>
                 <h1><?php echo e($pageTitle); ?></h1>
-                <p><?php echo e($pageSubtitle); ?></p>
             </div>
             <?php if ($view === 'overview'): ?>
             <div class="adm-top-actions">

@@ -132,7 +132,6 @@ include __DIR__ . '/../include/head_meta.php';
 
                 <!-- ============ STEP 1 — PROFILE TYPE ============ -->
                 <h4 class="sec-section">What are you listing?</h4>
-                <p class="sec-hint">Choose between your personal skill or a business.</p>
                 <?php if (isset($errors['profile_type'])): ?>
                     <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['profile_type']); ?></p>
                 <?php endif; ?>
@@ -142,18 +141,12 @@ include __DIR__ . '/../include/head_meta.php';
                             <input type="radio" name="profile_type" value="<?php echo htmlspecialchars($slug); ?>"
                                    <?php echo $oldInput['profile_type'] === $slug ? 'checked' : ''; ?>>
                             <span class="type-card-title"><?php echo htmlspecialchars($label); ?></span>
-                            <span class="type-card-sub">
-                                <?php echo $slug === 'individual'
-                                    ? 'Your personal trade or skill'
-                                    : 'A company, shop or rental'; ?>
-                            </span>
                         </label>
                     <?php endforeach; ?>
                 </div>
 
                 <!-- ============ STEP 2 — INSTANT SEARCH TITLE ============ -->
                 <h4 class="sec-section">Your title</h4>
-                <p class="sec-hint">Search and pick the job title or business type.</p>
                 <?php if (isset($errors['selected_title'])): ?>
                     <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['selected_title']); ?></p>
                 <?php endif; ?>
@@ -190,7 +183,6 @@ include __DIR__ . '/../include/head_meta.php';
 
                 <!-- ============ STEP 3 — LOCATION & IDENTITY ============ -->
                 <h4 class="sec-section">Location</h4>
-                <p class="sec-hint">Pick your municipality, then its barangay — then mark the exact spot below.</p>
 
                 <!-- Municipality: choosing one reloads the barangay
                      list below via maps_pinning.js (no page reload). -->
@@ -299,8 +291,6 @@ include __DIR__ . '/../include/head_meta.php';
                                placeholder="e.g. 11.297029, 123.730595"
                                aria-label="Google Maps link or coordinates">
                     </div>
-                    <p class="map-picker-hint">Open Google Maps, find your shop and mark the exact spot &mdash; long-press or right-click it to copy the coordinates, or drop a pin and use Share &rarr; Copy link. Paste the link or the &quot;lat, lng&quot; numbers above and we&rsquo;ll save the pin and add a route button to your listing. A business listing must be pinned before it can be saved.</p>
-                    <p class="map-picker-hint">This hand-pasted Google Maps pin is for business listings only &mdash; individual skills listings pin themselves with the device&rsquo;s GPS instead, so this box is never shown on them.</p>
                     <!-- Inline block message: maps_pinning.js reveals it
                          when a BUSINESS form is submitted with no pin.
                          save_profile.php enforces the same rule again. -->
@@ -403,9 +393,6 @@ include __DIR__ . '/../include/head_meta.php';
         <div class="modal-card">
             <button type="button" class="modal-close" data-gps-close aria-label="Close">&times;</button>
             <h4>&#128205; Pin my current location</h4>
-            <p class="sec-hint">islaFIND would like to use your device's GPS to pin your
-                <strong>exact location</strong> on your listing map. No location is captured
-                unless you allow it — you can skip this now and still save your listing.</p>
             <div class="modal-actions">
                 <button type="button" class="btn btn-outline" id="gpsDenyBtn">Not now</button>
                 <button type="button" class="btn btn-isla" id="gpsAllowBtn">Allow GPS access</button>

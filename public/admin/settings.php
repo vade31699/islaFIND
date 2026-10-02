@@ -48,7 +48,7 @@ $admin = admin_require_login($pdo);
 // The overview is the empty value; everything else is one of the
 // sections below. Whitelisted, so the query string can only ever
 // select a screen that exists.
-$sections = ['email', 'password', 'mfa', 'account'];
+$sections = ['email', 'password', 'mfa'];
 
 $section = (string) ($_GET['section'] ?? '');
 if (!in_array($section, $sections, true)) {
@@ -270,34 +270,24 @@ $emailPending = admin_settings_change_pending('email');
 $mfaPending   = admin_settings_change_pending('mfa');
 $mfaEnabled   = (int) $admin['mfa_enabled'] === 1;
 
-// One place where each section describes itself, so the hub and the
-// section screen can never drift apart. `status` is the one line the
-// hub shows next to the label, so the list is informative at a glance
-// rather than three identical rows.
+// One place where each section's label, status and icon live, so the
+// hub and the section screen can never drift apart. `status` is the
+// one line the hub shows next to the label.
 $sectionMeta = [
     'email' => [
         'label'  => 'Email address',
-        'blurb'  => 'The address you sign in with, and where every verification code goes.',
         'status' => (string) $admin['email'],
         'icon'   => '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7.5l9 6 9-6"/>',
     ],
     'password' => [
         'label'  => 'Password',
-        'blurb'  => 'Change the password on this admin account. Takes effect immediately.',
         'status' => 'Last changed on this page or from the server tool',
         'icon'   => '<rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
     ],
     'mfa' => [
         'label'  => 'Two-factor sign-in',
-        'blurb'  => 'After your password, we email a 6-digit code before you are let in.',
         'status' => $mfaEnabled ? 'On' : 'Off',
         'icon'   => '<path d="M12 3l7 3v6c0 4.5-3 8-7 8s-7-3.5-7-8V6z"/><path d="M9.5 12.5l1.8 1.8 3.4-3.8"/>',
-    ],
-    'account' => [
-        'label'  => 'Creating or resetting this account',
-        'blurb'  => 'There is no self-service admin signup, by design. Accounts are made from a shell.',
-        'status' => 'Server tool',
-        'icon'   => '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/>',
     ],
 ];
 
@@ -313,10 +303,7 @@ if ($emailPending !== null) {
 // --- 7. Page furniture -----------------------------------------
 $sectionLabel  = $section !== '' ? $sectionMeta[$section]['label'] : '';
 
-$pageTitle    = $section === '' ? 'Settings' : $sectionLabel;
-$pageSubtitle = $section === ''
-    ? 'Your admin email, password and sign-in security.'
-    : $sectionMeta[$section]['blurb'];
+$pageTitle = $section === '' ? 'Settings' : $sectionLabel;
 
 // Where the header's Back button goes: a section returns to the hub.
 $backHref = 'index.php';
@@ -416,7 +403,6 @@ $backHref = 'index.php';
             </a>
             <div>
                 <h1><?php echo e($pageTitle); ?></h1>
-                <p><?php echo e($pageSubtitle); ?></p>
             </div>
         </header>
 
@@ -434,7 +420,6 @@ $backHref = 'index.php';
                 <div class="adm-panel-head">
                     <div>
                         <h2>Account security</h2>
-                        <p>Pick what you want to change. Each one opens on its own screen.</p>
                     </div>
                 </div>
 
@@ -446,7 +431,6 @@ $backHref = 'index.php';
                             </span>
                             <span class="adm-option-text">
                                 <strong><?php echo e($meta['label']); ?></strong>
-                                <span><?php echo e($meta['blurb']); ?></span>
                             </span>
                             <span class="adm-option-meta">
                                 <?php if ($key === $pendingSection): ?>
@@ -467,7 +451,6 @@ $backHref = 'index.php';
                 <div class="adm-panel-head">
                     <div>
                         <h2>Email address</h2>
-                        <p>We send a code to the new address before anything moves, so a typo cannot lock you out.</p>
                     </div>
                 </div>
                 <div class="adm-panel-body">
@@ -483,11 +466,6 @@ $backHref = 'index.php';
                         <form method="POST" class="adm-form">
                             <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
                             <input type="hidden" name="do" value="confirm_email_change">
-                            <p class="adm-secondary">
-                                Enter the 6-digit code sent to
-                                <strong><?php echo e((string) $emailPending['email']); ?></strong>.
-                                It expires in 2 minutes.
-                            </p>
                             <div class="field">
                                 <label class="field-label" for="email_code">Verification code</label>
                                 <input class="field-in adm-code" type="text" id="email_code" name="code"
@@ -530,7 +508,6 @@ $backHref = 'index.php';
                 <div class="adm-panel-head">
                     <div>
                         <h2>Password</h2>
-                        <p>At least 8 characters, with an uppercase letter, a lowercase letter and one of ! @ -.</p>
                     </div>
                 </div>
                 <div class="adm-panel-body">
@@ -573,15 +550,6 @@ $backHref = 'index.php';
                 <div class="adm-panel-head">
                     <div>
                         <h2>Two-factor sign-in</h2>
-                        <p>
-                            <?php if ($mfaEnabled): ?>
-                                <strong>On.</strong> After your password, we email a 6-digit code to
-                                <?php echo e($admin['email']); ?>.
-                            <?php else: ?>
-                                <strong>Off.</strong> Your password alone signs you in. Turning this on is
-                                strongly recommended.
-                            <?php endif; ?>
-                        </p>
                     </div>
                     <div class="adm-panel-head-actions">
                         <?php if ($mfaEnabled): ?>
@@ -601,12 +569,6 @@ $backHref = 'index.php';
                             <input type="hidden" name="csrf_token" value="<?php echo e(csrf_token()); ?>">
                             <input type="hidden" name="do" value="confirm_mfa_change">
                             <input type="hidden" name="mfa_enabled" value="<?php echo $mfaEnabled ? '0' : '1'; ?>">
-                            <p class="adm-secondary">
-                                Enter the 6-digit code sent to
-                                <strong><?php echo e((string) $mfaPending['email']); ?></strong>
-                                to <?php echo $mfaEnabled ? 'turn this OFF' : 'turn this ON'; ?>.
-                                It expires in 2 minutes.
-                            </p>
                             <div class="field">
                                 <label class="field-label" for="mfa_code">Verification code</label>
                                 <input class="field-in adm-code" type="text" id="mfa_code" name="code"
@@ -639,28 +601,6 @@ $backHref = 'index.php';
                 </div>
             </div>
 
-            <?php else: ?>
-            <!-- ============ Creating / resetting the account ============ -->
-            <div class="adm-panel">
-                <div class="adm-panel-head">
-                    <div>
-                        <h2>Creating or resetting this account</h2>
-                        <p>There is no self-service admin signup, by design.</p>
-                    </div>
-                </div>
-                <div class="adm-panel-body">
-                    <p class="adm-secondary">
-                        Superadmin accounts are made on the server, from a shell, with the password typed
-                        in blind so it never reaches your shell history:
-                    </p>
-                    <pre class="adm-code-block">php tools/create_admin.php --email=you@example.com</pre>
-                    <p class="adm-secondary">
-                        Run the same command with <strong>--reset</strong> to set a new password from the
-                        command line. Everything on this page works afterwards: change the email here, and
-                        change the password from the tool or from the Password screen.
-                    </p>
-                </div>
-            </div>
             <?php endif; ?>
 
         </div>

@@ -58,10 +58,6 @@ $headDesc  = 'That link is not part of islaFIND. Head back to the dashboard or t
             </div>
 
             <h2 class="notfound-title">We could not find that page</h2>
-            <p class="sec-hint">
-                The link may be broken, or the page may have been moved. Nothing about your
-                account changed &mdash; use one of the buttons below to get back on track.
-            </p>
 
             <div class="notfound-actions">
                 <a href="<?php echo htmlspecialchars($primaryHref); ?>" class="btn btn-isla"><?php echo htmlspecialchars($primaryLabel); ?></a>

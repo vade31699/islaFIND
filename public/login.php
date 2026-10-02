@@ -965,7 +965,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // --- 8. Panel helper strings for the shared header ---------------
-// The title/subtitle/footer change with the active panel; these are
+// The title and footer change with the active panel; these are
 // computed server-side so the correct text shows even without JS.
 $mfaMode = isset($_SESSION['mfa']);
 // The admin sign-in challenge shares this panel with the member code
@@ -973,7 +973,6 @@ $mfaMode = isset($_SESSION['mfa']);
 // for a privileged session, not a member finishing a sign-in.
 $adminMfaMode = isset($_SESSION['admin_mfa']);
 $panelTitle    = 'Login';
-$panelSubtitle = 'Sign in with your email or phone number';
 $footerQuestion = 'No account yet?';
 $footerLink     = 'Create one here';
 // The verify and forgot panels each carry their own "Back to login"
@@ -982,18 +981,12 @@ $footerLink     = 'Create one here';
 $hideFooter     = false;
 if ($initialPanel === 'register') {
     $panelTitle    = 'Create Account';
-    $panelSubtitle = 'Join islaFIND — you must be 18 or older.';
     $footerQuestion = 'Already have an account?';
     $footerLink     = 'Log in';
 } elseif ($initialPanel === 'verify') {
     $panelTitle    = $adminMfaMode
         ? 'Superadmin Verification'
         : ($mfaMode ? 'Two-Factor Authentication' : 'Verify your email');
-    $panelSubtitle = $adminMfaMode
-        ? 'Enter the one-time code we emailed to your admin address'
-        : ($mfaMode
-            ? 'Enter the one-time code we emailed to your registered address'
-            : 'Enter the code we emailed to you to confirm your account');
     // No footer: the verify panel's own "Back to login" link already
     // clears the pending verification and returns to the login panel.
     $footerQuestion = '';
@@ -1001,7 +994,6 @@ if ($initialPanel === 'register') {
     $hideFooter     = true;
 } elseif ($initialPanel === 'forgot') {
     $panelTitle    = 'Forgot Password';
-    $panelSubtitle = 'Enter your email or phone and we will send a reset code.';
     // No footer: the panel's own "Back to Login" button is enough.
     $footerQuestion = '';
     $footerLink     = '';
@@ -1012,9 +1004,6 @@ if ($initialPanel === 'register') {
     $resetVerified = isset($_SESSION['pending_reset']['verified'])
                      && $_SESSION['pending_reset']['verified'] === true;
     $panelTitle    = 'Reset Password';
-    $panelSubtitle = $resetVerified
-        ? 'Code verified — enter your new password.'
-        : 'Enter the 6-digit code we emailed to you.';
     // The reset panel keeps its own "Back to Login" button, so this
     // footer link is NOT redundant: it takes a new visitor straight
     // to registration.
@@ -1069,9 +1058,8 @@ include __DIR__ . '/../include/head_meta.php';
             <!-- Shared app logo (stays still while panels slide) -->
             <img src="img/isla_logo.svg" alt="islaFIND logo" class="auth-logo">
 
-            <!-- Heading + subtitle; text is swapped by the JS switcher -->
+            <!-- Heading; text is swapped by the JS switcher -->
             <h2 id="authTitle"><?php echo htmlspecialchars($panelTitle); ?></h2>
-            <p class="auth-subtitle" id="authSubtitle"><?php echo htmlspecialchars($panelSubtitle); ?></p>
 
             <!-- Green success alert, shown right after verification -->
             <?php if ($justRegistered): ?>
@@ -1608,7 +1596,6 @@ include __DIR__ . '/../include/head_meta.php';
         const toggleLink     = document.getElementById('toggleLink');
         const toggleQuestion = document.getElementById('toggleQuestion');
         const authTitle      = document.getElementById('authTitle');
-        const authSubtitle   = document.getElementById('authSubtitle');
         const authFooter     = document.querySelector('.auth-footer');
         const forgotLink     = document.getElementById('forgotLink');
 
@@ -1664,39 +1651,24 @@ include __DIR__ . '/../include/head_meta.php';
 
             if (panel === 'register') {
                 authTitle.textContent = 'Create Account';
-                authSubtitle.textContent = 'Join islaFIND — you must be 18 or older.';
                 toggleQuestion.textContent = 'Already have an account?';
                 toggleLink.textContent = 'Log in';
             } else if (panel === 'verify') {
                 authTitle.textContent = adminMfaMode
                     ? 'Superadmin Verification'
                     : (mfaMode ? 'Two-Factor Authentication' : 'Verify your email');
-                authSubtitle.textContent = adminMfaMode
-                    ? 'Enter the one-time code we emailed to your admin address'
-                    : (mfaMode
-                        ? 'Enter the one-time code we emailed to your registered address'
-                        : 'Enter the code we emailed to you to confirm your account');
                 toggleQuestion.textContent = '';
                 toggleLink.textContent = '';
             } else if (panel === 'forgot') {
                 authTitle.textContent = 'Forgot Password';
-                authSubtitle.textContent = 'Enter your email or phone and we will send a reset code.';
                 toggleQuestion.textContent = '';
                 toggleLink.textContent = '';
             } else if (panel === 'reset') {
                 authTitle.textContent = 'Reset Password';
-                // The subtitle reflects the two-step flow: the code is
-                // verified first, only then does the new-password form
-                // (and its subtitle) show.
-                const resetPwStep = document.getElementById('resetStepPassword');
-                authSubtitle.textContent = (resetPwStep && !resetPwStep.hidden)
-                    ? 'Code verified — enter your new password.'
-                    : 'Enter the 6-digit code we emailed to you.';
                 toggleQuestion.textContent = 'New to islaFIND?';
                 toggleLink.textContent = 'Create an account';
             } else {
                 authTitle.textContent = 'Login';
-                authSubtitle.textContent = 'Sign in with your email or phone number';
                 toggleQuestion.textContent = 'No account yet?';
                 toggleLink.textContent = 'Create one here';
             }

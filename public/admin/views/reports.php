@@ -151,13 +151,5 @@ $providerQuery = $providerFilter > 0 ? '&amp;provider=' . (int) $providerFilter 
                 </table>
             </div>
         </div>
-
-        <?php if (count($queue) >= 200): ?>
-            <div class="adm-panel-body">
-                <p class="adm-secondary is-flat">
-                    Showing the newest 200. Narrow the filter to see anything older.
-                </p>
-            </div>
-        <?php endif; ?>
     <?php endif; ?>
 </div>
