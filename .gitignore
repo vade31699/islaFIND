@@ -53,3 +53,21 @@ desktop.ini
 
 # --- Local backups of the dump --------------------------------
 *final_app*.sql.bak
+
+# --- Android (TWA) build ---------------------------------------
+# The source of truth is this PHP project; the Bubblewrap Android
+# project in twa/ is generated from twa-manifest.json. Never commit
+# the signing material: the keystore IS the app's identity on Google
+# Play, and its password is the only thing stopping anyone else from
+# publishing an update over it. Back the keystore up somewhere
+# private — the repo is the wrong place, and losing it locks you out
+# of updating the same listing.
+/twa/*.keystore
+/twa/*.jks
+/twa/*.p12
+/twa/.keystore-pass
+# Generated build output and local Gradle caches
+/twa/.gradle/
+/twa/build/
+/twa/**/build/
+/twa/local.properties

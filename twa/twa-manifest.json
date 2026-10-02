@@ -1,0 +1,38 @@
+{
+  "packageId": "com.vade31699.islafind",
+  "host": "islafind.laravel.cloud",
+  "name": "islaFIND",
+  "launcherName": "islaFIND",
+  "display": "standalone",
+  "themeColor": "#0077B6",
+  "themeColorDark": "#005F92",
+  "navigationColor": "#0077B6",
+  "navigationColorDark": "#005F92",
+  "navigationDividerColor": "#0077B6",
+  "navigationDividerColorDark": "#005F92",
+  "backgroundColor": "#F8F9FA",
+  "enableNotifications": false,
+  "enableSiteSettingsShortcut": true,
+  "startUrl": "/index.php",
+  "iconUrl": "http://127.0.0.1:8765/img/icon-512.png",
+  "maskableIconUrl": "http://127.0.0.1:8765/img/icon-maskable-512.png",
+  "webManifestUrl": "https://islafind.laravel.cloud/manifest.webmanifest",
+  "fullScopeUrl": "https://islafind.laravel.cloud/",
+  "orientation": "portrait-primary",
+  "appVersion": "1.0.0",
+  "appVersionCode": 1,
+  "splashScreenFadeOutDuration": 300,
+  "fallbackType": "customtabs",
+  "generatorApp": "bubblewrap-cli",
+  "isChromeOSOnly": false,
+  "signingKey": {
+    "path": "./isla-find.keystore",
+    "alias": "islafind"
+  },
+  "fingerprints": [
+    {
+      "name": "islaFIND local signing key",
+      "value": "3B:80:A6:47:CF:7F:55:7E:60:7E:55:5C:AA:04:86:78:8F:19:A1:E7:50:0B:EE:29:2D:15:94:3B:57:32:43:2D"
+    }
+  ]
+}
