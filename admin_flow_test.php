@@ -223,6 +223,7 @@ check('the test fixtures were created', $adminId > 0 && $ownerId > 0 && $reporte
 // ============================================================
 $port    = random_int(20000, 60000);
 $base    = 'http://127.0.0.1:' . $port;
+$root    = __DIR__;               // project root: the child server's cwd
 $web     = __DIR__ . '/public';
 $logFile = tempnam(sys_get_temp_dir(), 'isla_adm_');
 $proc    = proc_open(
@@ -909,9 +910,14 @@ check('the pending address is shown back to the member',
 // off the page: when SMTP is configured the page does not contain it.
 function pending_code(string $jar): string
 {
-    // The cookie jar holds the session id; the session payload lives in
-    // whatever save_path php.ini configured, which on WAMP is NOT the
-    // system temp dir. Guessing either one makes this silently return ''.
+    // The cookie jar holds the session id. Which storage holds the
+    // payload depends on SESSION_DRIVER: PHP's own files by default, or
+    // the isla_sessions table when the app runs with the database-backed
+    // handler. Reading the wrong one silently returns ''.
+    //
+    // The child server under test shares this process's environment, so
+    // both agree on the driver; isla_session_driver() is the same switch
+    // the app itself reads.
     $sid = '';
     foreach (preg_split('/\r?\n/', (string) @file_get_contents($jar)) as $line) {
         $parts = explode("\t", trim($line));
@@ -923,14 +929,27 @@ function pending_code(string $jar): string
         return '';
     }
 
-    $path = rtrim(session_save_path(), '/\\') . DIRECTORY_SEPARATOR . 'sess_' . $sid;
-    $data = @file_get_contents($path);
-    if ($data === false) {
+    global $pdo;
+    require_once __DIR__ . '/include/session_store.php';
+
+    if (isla_session_driver() === 'mysql') {
+        // Database-backed sessions: the payload is a row, not a file.
+        $stmt = $pdo->prepare('SELECT data FROM isla_sessions WHERE id = :id LIMIT 1');
+        $stmt->execute([':id' => $sid]);
+        $data = (string) $stmt->fetchColumn();
+    } else {
+        // PHP's file storage. The payload lives in whatever save_path
+        // php.ini configured, which on WAMP is NOT the system temp dir.
+        $path = rtrim(session_save_path(), '/\\') . DIRECTORY_SEPARATOR . 'sess_' . $sid;
+        $data = (string) @file_get_contents($path);
+    }
+    if ($data === '') {
         return '';
     }
-    // PHP serialises nested arrays key-then-value, so the code sits
-    // directly after the "code" key: ...|s:4:"code";s:6:"123456";
-    return preg_match('/\|s:4:"code";\|s:6:"(\d{6})"/', $data, $m) ? $m[1] : '';
+    // PHP's session serializer ('php') joins a nested array's keys and
+    // values with ';' (only the TOP-level key is followed by '|'), so the
+    // code sits as: ...;s:4:"code";s:6:"123456";...
+    return preg_match('/[|;]s:4:"code";s:6:"(\d{6})"/', $data, $m) ? $m[1] : '';
 }
 $code = pending_code($memberJar);
 check('a 6-digit code is pending in the session', (bool) preg_match('/^\d{6}$/', $code),

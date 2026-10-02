@@ -195,13 +195,6 @@ body {
     letter-spacing: 1px;
 }
 
-/* Small gray subtitle under the heading */
-.auth-subtitle {
-    margin: 0 0 22px 0;       /* Space before the form / alert */
-    color: #777777;
-    font-size: 14px;
-}
-
 /* ---------- Sliding auth panels (login + create account) ------
    The card holds ONE track that is twice as wide as the visible
    area. Each panel is 50% of that track, so sliding the track
@@ -2421,16 +2414,6 @@ body {
     transform: rotate(90deg);
 }
 
-/* The expandable body (hidden via the hidden attribute) */
-.collapse-body {
-    padding-top: 14px;
-}
-
-/* Guard: the hidden attribute must win */
-.collapse-body[hidden] {
-    display: none;
-}
-
 /* Privacy & Security sub-views: only the chosen option's content is
    visible — the options list hides while a view is open. */
 .sec-view[hidden],
@@ -3307,14 +3290,6 @@ body {
     border-radius: 20px;
 }
 
-
-.provider-desc {
-    margin: 10px 0 0 0;
-    font-size: 13px;
-    color: #555555;
-    line-height: 1.5;
-}
-
 .provider-card-actions {
     display: flex;
     gap: 8px;
@@ -3369,13 +3344,6 @@ body {
     color: #999999;
     font-size: 11px;
     white-space: nowrap;
-}
-
-.inquiry-text {
-    margin: 8px 0;
-    font-size: 13px;
-    color: #444444;
-    line-height: 1.5;
 }
 
 .inquiry-foot {
@@ -3463,14 +3431,6 @@ body {
     font-weight: 700;
     color: #333333;
     line-height: 1.25;
-}
-
-.type-card-sub {
-    display: block;
-    margin-top: 4px;
-    font-size: 11px;
-    color: #8a9890;
-    line-height: 1.3;
 }
 
 /* The active card turns green like the app accent */
@@ -3572,42 +3532,6 @@ body {
     outline: none;
     border-color: var(--primary);
     box-shadow: 0 0 0 3px rgba(0, 119, 182, 0.15);
-}
-
-/* Optional profile picture: dashed drop-zone style picker */
-.file-pick {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px;
-    border: 1.5px dashed #c9d8cf;
-    border-radius: 10px;
-    background: #fafbfa;
-    font-size: 13px;
-    color: #4a5a50;
-    cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
-}
-
-.file-pick:hover {
-    border-color: var(--primary);
-    background: #f2faf5;
-}
-
-.file-pick svg {
-    flex: none;
-    width: 20px;
-    height: 20px;
-    color: var(--primary);
-}
-
-.file-pick input[type="file"] {
-    position: absolute;
-    opacity: 0;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
 }
 
 /* Label above the description textarea */
@@ -5094,17 +5018,11 @@ body {
 
 
 .prov-album-empty,
-.prov-album-full,
-.prov-album-hint {
+.prov-album-full {
     margin: 0 0 8px;
     font-size: 11px;
     line-height: 1.5;
     color: #5b7a6d;
-}
-
-.prov-album-hint {
-    margin: 8px 0 0;
-    color: #7d968c;
 }
 
 .prov-album-full {

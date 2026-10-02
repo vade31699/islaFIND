@@ -1935,6 +1935,7 @@ include __DIR__ . '/../include/head_meta.php';
                                  editable field: it lives in the session, and an
                                  editable copy is exactly how a code sent to one
                                  address ends up applied to another. -->
+                            <p class="sec-hint">Code sent to <strong><?php echo $pendingEmailChangeMail; ?></strong></p>
                             <form action="dashboard.php" method="POST" novalidate>
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                                 <div class="form-group">

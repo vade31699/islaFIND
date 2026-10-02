@@ -517,12 +517,6 @@
     font-variant-numeric: tabular-nums;
 }
 
-.adm-stat-hint {
-    font-size: 12.5px;
-    color: var(--adm-muted);
-    margin-top: 6px;
-}
-
 .adm-stat.is-alert {
     border-color: rgba(232, 85, 77, .45);
     background: linear-gradient(180deg, #fff7f6, #fff);
@@ -588,12 +582,6 @@
     font-size: 15.5px;
     color: var(--adm-ink);
     letter-spacing: -.01em;
-}
-
-.adm-panel-head p {
-    margin: 3px 0 0;
-    font-size: 12.5px;
-    color: var(--adm-muted);
 }
 
 .adm-panel-head-actions {
@@ -670,11 +658,6 @@
     letter-spacing: -.01em;
 }
 
-.adm-option-text span {
-    font-size: 12.5px;
-    color: var(--adm-muted);
-}
-
 /* State, then the chevron. Pushed to the far end and allowed to
    truncate: an email address here can be long, and it must never
    squeeze the label out of the row. */
@@ -708,15 +691,11 @@
     transform: translateX(2px);
 }
 
-/* A panel head is a flex ROW so its actions can sit at the far end, which
-   means a title and its subtitle have to be told to stack. index.php wraps
-   them in a <div>; settings.php writes them as bare siblings, and without
-   this rule "Sign-in email" and "Where your verification codes go." render
-   on ONE line with the title vertically centred against the subtitle.
-   Forcing full-width basis on the bare children fixes that shape and stops
-   the next view from reintroducing it. */
-.adm-panel-head > h2,
-.adm-panel-head > p {
+/* A panel head is a flex ROW so its actions can sit at the far end. A bare
+   <h2> child (the "Decide" panel writes one) has to be told to take the
+   full width, or it is squeezed against the actions instead of sitting on
+   its own line. */
+.adm-panel-head > h2 {
     flex: 0 0 100%;
     margin-left: 0;
 }
@@ -1076,7 +1055,6 @@
     margin: 22px 0 9px;
 }
 
-.adm-tight { margin: 0 0 9px; }
 .adm-stack { margin: 0 0 5px; }
 .adm-spaced { margin-top: 15px; }
 
@@ -1091,34 +1069,7 @@
 }
 
 /* ------------------------------------------------------------
-   7. Settings rows
-   ------------------------------------------------------------ */
-.adm-form-row {
-    display: grid;
-    grid-template-columns: minmax(180px, 30%) 1fr;
-    gap: 24px;
-    padding: 20px;
-    border-bottom: 1px solid var(--adm-line-soft);
-}
-
-.adm-form-row:last-child {
-    border-bottom: none;
-}
-
-.adm-form-row h3 {
-    margin: 0;
-    font-size: 14.5px;
-    color: var(--adm-ink);
-}
-
-.adm-form-row p {
-    margin: 5px 0 0;
-    font-size: 12.5px;
-    color: var(--adm-muted);
-}
-
-/* ------------------------------------------------------------
-   8. Narrow screens
+   7. Narrow screens
    ------------------------------------------------------------ */
 @media (max-width: 1024px) {
     /* The queue is eight columns wide. Rather than let the table
@@ -1416,8 +1367,7 @@
         padding: 18px 18px 52px;
     }
 
-    .adm-detail,
-    .adm-form-row {
+    .adm-detail {
         grid-template-columns: 1fr;
     }
 
@@ -1425,10 +1375,9 @@
         font-size: 26px;
     }
 }
-/* ---------- Settings: codes and commands ----------
-   Two things the other views have no equivalent for: a 6-digit
-   verification box, and the shell command an operator runs to create
-   or reset an admin account. */
+/* ---------- Settings: the verification code box ----------
+   The other views have no equivalent: a 6-digit one-time code, set
+   widely and monospaced so a mistyped digit is obvious. */
 
 .adm-code {
     /* Wide enough that the six digits do not feel cramped, and set in
@@ -1439,19 +1388,6 @@
     text-align: center;
     text-indent: 6px;   /* balances the letter-spacing so it stays centred */
     padding: 12px 14px;
-}
-
-.adm-code-block {
-    margin: 10px 0;
-    padding: 12px 14px;
-    background: #0f2233;
-    color: #d7f0e0;
-    border-radius: 10px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.6;
-    overflow-x: auto;
-    white-space: pre;
 }
 
 /* The panels in Settings are stacked, so give each one room to breathe
