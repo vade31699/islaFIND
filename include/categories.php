@@ -90,6 +90,62 @@ $municipalityCenters = [
     'Madridejos' => ['lat' => 11.296208, 'lng' => 123.732926],
 ];
 
+/**
+ * isla_listing_label(?string $categorySlug, ?string $name,
+ *                    ?string $municipality, string $fallback = 'this listing'): string
+ * How ONE listing is named in a sentence: a business by its own name
+ * ("Sea Breeze Resort"), an individual by the skill they offer
+ * ("Electrician, Santa Fe").
+ * A listing is what a member inquires about and what a job is pinned
+ * to, so the messenger and the My Jobs panel both need the same short
+ * name for it — this is the single definition, so those two can never
+ * describe the same listing differently.
+ *
+ * $fallback covers the listing that has been deleted: the stored
+ * label (or the listing row) is gone and there is nothing left to
+ * name, so the caller supplies the words it wants instead
+ * ("a listing that is no longer available").
+ *
+ * NOT the same string as the admin panel's adm_listing_title(),
+ * which writes "Name — Category, Place" for a business. This one
+ * goes inside a chat sentence, where the extra dash would read as
+ * punctuation rather than as part of the name. Both name the same
+ * listing for different readers: the admin triaging the queue, and
+ * the member reading who they are talking to.
+ *
+ * @param string|null $categorySlug providers.selected_title (a key of $providerCategories).
+ * @param string|null $name          providers.name (businesses only; NULL for individuals).
+ * @param string|null $municipality  providers.municipality.
+ * @param string      $fallback      Used when nothing is filled in at all.
+ * @return string
+ */
+function isla_listing_label(?string $categorySlug, ?string $name, ?string $municipality, string $fallback = 'this listing'): string
+{
+    global $providerCategories;
+
+    $label = trim((string) ($providerCategories[(string) $categorySlug] ?? ''));
+    if ($label === '') {
+        $label = trim((string) $categorySlug);
+    }
+
+    $businessName = trim((string) $name);
+    $place        = trim((string) $municipality);
+
+    // A business is its own name. Only when it has none (which the
+    // form prevents, but a legacy row may still be) does it fall
+    // back to the category, like an individual listing does.
+    $subject = $businessName !== '' ? $businessName : $label;
+
+    if ($subject === '') {
+        return $fallback;
+    }
+
+    // "Electrician, Santa Fe" — the place only when there is one, so
+    // a listing saved before the address was filled in reads as just
+    // its skill rather than "Electrician, ".
+    return $place !== '' ? $subject . ', ' . $place : $subject;
+}
+
 // --- 5. Flat list of every barangay (backward compatibility) ----
 // Some older code paths expect a plain array of all barangays; this
 // is the flattened union of the cascading map above.

@@ -316,15 +316,34 @@ CREATE TABLE IF NOT EXISTS profile_reports (
 -- pair can only talk once the provider accepts it. Existing
 -- threads default to 'accepted' so they keep working.
 -- One thread per provider-client pair (UNIQUE on the pair).
+--
+-- listing_id / listing_label : WHICH listing the inquiry is about.
+-- A member may own several listings (a mechanic who also runs a
+-- sari-sari store), so "Jane messaged you" does not say what they
+-- are asking about. send_message.php stamps the listing the
+-- inquiry was sent from, and messenger.php renders its label
+-- ("Electrician, Santa Fe") on the thread, the message request
+-- and the inbox row — so the provider reads the subject before
+-- they accept the request.
+-- Deliberately NO foreign key on listing_id. Deleting a listing
+-- must not delete a conversation that has messages in it, and the
+-- label is stored as text precisely so a thread can still say what
+-- it was about after the listing is gone — so a stale id is inert.
+-- (The other tables here do carry FKs; this one would only be able
+-- to say CASCADE, which is the wrong answer, or SET NULL, which the
+-- app already does by keeping the label.)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS conversations (
     id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
     provider_id INT UNSIGNED NOT NULL,
     client_id   INT UNSIGNED NOT NULL,
+    listing_id    INT UNSIGNED NULL,
+    listing_label VARCHAR(160) NULL,
     created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     status      ENUM('pending','accepted','declined') NOT NULL DEFAULT 'accepted',
     PRIMARY KEY (id),
     UNIQUE KEY uq_pair (provider_id, client_id),
+    KEY idx_conv_listing (listing_id),
     CONSTRAINT fk_conv_provider FOREIGN KEY (provider_id)
         REFERENCES users (id) ON DELETE CASCADE,
     CONSTRAINT fk_conv_client FOREIGN KEY (client_id)
@@ -392,8 +411,16 @@ CREATE TABLE IF NOT EXISTS messages (
 -- client_id           : the client's user account (users.id)
 -- status              : pending | pending_hire | accepted | declined | completed | cancelled
 -- is_rated            : 1 once the client submits their review
--- created_at          : auto-filled when the hire is recorded
--- Only a client with a COMPLETED contract may rate the provider.
+-- created_at          : auto-filled when the inquiry is recorded
+-- A row is written for EVERY inquiry, so a provider can TRACK it from
+-- My Jobs instead of the inquiry existing only as a chat bubble:
+--   - INDIVIDUAL SKILLS -> the job that runs through the hire flow
+--     (pending_hire -> accepted -> completed) and can be rated.
+--   - BUSINESS -> a BOOKING the owner tracks to completion. It is
+--     never hired and never rated (rate_service.php refuses it), so a
+--     business row only ever reaches pending/completed.
+-- Only a client with a COMPLETED individual skills contract may rate
+-- the provider.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS service_contracts (
     id                  INT UNSIGNED NOT NULL AUTO_INCREMENT,

@@ -161,6 +161,10 @@ hand-written JavaScript files.
 - **Hire flow**: HIRE! → ACCEPT / DECLINE → job accepted ("On the Job") →
   JOB DONE → the client is prompted to rate. Only *individual* listings can be
   hired; businesses are inquired about and chatted with.
+- **Trackable inquiries**: every inquiry writes a `service_contracts` row, so
+  it shows up under **My Jobs** instead of living only as a chat bubble. An
+  individual inquiry is the hire job above; a business inquiry is a **booking**
+  the owner can track and close out — it never enters the hire or rating chain.
 - **Reviews are gated**: a review can only exist on a contract that reached
   `completed`, so nothing fake can be rated.
 - **Notification bell** derived live from unread messages, pending hire
@@ -638,7 +642,7 @@ Deliberately **not** done yet:
 | `provider_album_images` | A business listing's extra photos: `provider_id`, the stored filename, its `sort_order`, and when it was added. Up to `ISLA_ALBUM_MAX_PHOTOS` (5) per listing, deleted with the listing by its foreign key. Created at runtime by `db.php` if missing. |
 | `conversations` | One thread per provider–client pair, with `pending` / `accepted` / `declined` request state. |
 | `messages` | Thread messages with a `kind` of `chat` or `system`, plus per-user and per-message soft-delete flags. |
-| `service_contracts` | Jobs: `pending → pending_hire → accepted → completed` (or `declined` / `cancelled`), pinned to the exact listing hired. |
+| `service_contracts` | Trackable inquiries, pinned to the exact listing asked about. An **individual** inquiry is a job: `pending → pending_hire → accepted → completed` (or `declined` / `cancelled`), and only it can be rated. A **business** inquiry is a booking that stops at `pending` / `completed` and is never hired or rated. |
 | `reviews` | One earned review per completed contract (unique on the contract). |
 | `saved_listings` | Bookmarks, unique per (user, listing). Created at runtime by `db.php` if missing. |
 | `user_interactions` | View / inquiry / review history that feeds the recommendation ranking. |

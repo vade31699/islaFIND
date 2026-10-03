@@ -1168,6 +1168,20 @@ body {
     color: #333333;
 }
 
+/* WHICH LISTING a conversation is about, on the inbox row. A
+   conversation is one per person, but a member can own several
+   listings — so two inquiries to the same person read as two
+   identical rows unless the subject is on them. Muted and one line,
+   above the preview: it labels the row, it is not the message. */
+.chat-subject {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary-dark, #1d7a44);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* Last-message preview: single line, ellipsized */
 .chat-preview {
     font-size: 13px;
@@ -1397,6 +1411,32 @@ body {
     margin: 20px 0;
 }
 
+/* The subject of the thread, under the name in the green header.
+   Sits below the title on its own line: the title is the person, the
+   subtitle is what they are talking to you about. */
+/* The title + subtitle stack, taking the row's free space so the
+   HIRE! button / gear can still be pinned to the right with
+   margin-left: auto. min-width: 0 is what lets a long listing name
+   ellipsize instead of squeezing the action off the header. */
+.app-header-id {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.app-header-sub {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.82);
+    letter-spacing: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+
 /* Banner shown when an inquiry just created this thread */
 .chat-banner {
     background: #e3f6ea;
@@ -1521,6 +1561,26 @@ body {
     text-align: center;
 }
 
+/* A message request pinned to the BOTTOM of the thread. It is the
+   newest thing in the conversation, so the gap it needs is ABOVE it
+   (separating it from the last message), not the below-it margin it
+   carries when it sits at the top — that space is the thread's own
+   bottom padding, and doubling it pushes the card away from the
+   input bar it belongs to. */
+.chat-thread > .hire-decision {
+    margin-top: 4px;
+    margin-bottom: 0;
+}
+
+/* The listing a reverse-direction request is about, inside the
+   compact banner above an already-open chat. */
+.hire-decision-subject {
+    margin: 6px 0 0 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #b07600;
+}
+
 /* Client action banner on an ACTIVE (accepted) job: the seeker
    can finish the job (JOB DONE -> rating modal) or cancel it.
    The banner keeps the green accent and stacks the two buttons
@@ -1572,6 +1632,19 @@ body {
     font-size: 13px;
     color: #5c6b63;
     margin: 0 0 10px 0;
+}
+
+/* "About: Electrician, Santa Fe" — the listing the request is about.
+   Pinned above the explanation, because it is the answer to the only
+   question the Accept/Decline buttons are actually deciding. */
+.msg-request-subject {
+    margin: 0 0 8px 0 !important;
+    color: #1d3a2b;
+    font-weight: 600;
+}
+
+.msg-request-subject span {
+    color: var(--primary-dark, #1d7a44);
 }
 
 .msg-request-actions {
@@ -3340,6 +3413,13 @@ body {
     color: #222222;
 }
 
+.inquiry-subject {
+    margin: 6px 0 0 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--primary-dark, #1d7a44);
+}
+
 .inquiry-meta span {
     color: #999999;
     font-size: 11px;
@@ -3366,6 +3446,7 @@ body {
 .inquiry-status.st-pending      { background: #fff4e0; color: #b07600; }
 .inquiry-status.st-pending_hire { background: #fff4e0; color: #b07600; }
 .inquiry-status.st-accepted     { background: #fff3e0; color: #b05600; }
+.inquiry-status.st-completed    { background: #e3f6ea; color: #1d7a44; }
 .inquiry-status.st-declined     { background: #f0f1f0; color: #8a918c; }
 .inquiry-status.st-cancelled    { background: #fdeaea; color: #b3261e; }
 .inquiry-status.st-available    { background: #e3f6ea; color: #1d7a44; }

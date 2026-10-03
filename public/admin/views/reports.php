@@ -1,7 +1,7 @@
 <?php
 // admin/views/reports.php — the moderation queue
 // Uses: $queue, $queueCounts, $statusFilter, $providerFilter,
-// $queueListing, e(), adm_listing_title(), adm_time_ago().
+// $searchQuery, $queueListing, e(), adm_listing_title(), adm_time_ago().
 
 $tabs = [
     'pending'   => 'Awaiting review',
@@ -10,14 +10,57 @@ $tabs = [
     'all'       => 'All',
 ];
 
+// The filters that have to survive a tab click, already escaped for
+// use inside an href. The search term is the one a tab must never
+// silently drop: an operator who searched a person and then clicked
+// "Resolved" is asking for that person's resolved reports, not for
+// the whole resolved queue.
 $providerQuery = $providerFilter > 0 ? '&amp;provider=' . (int) $providerFilter : '';
+$searchQueryParam = $searchQuery !== '' ? '&amp;q=' . rawurlencode($searchQuery) : '';
+
+// Tab links carry the search term through, and the Clear button on the
+// active-search chip drops it while keeping the status tab.
+$tabQuery = $providerQuery . $searchQueryParam;
+$clearSearchHref = 'index.php?view=reports&amp;status=' . rawurlencode($statusFilter) . $providerQuery;
 ?>
+<div class="adm-search">
+    <!-- Free-text search across the four things an operator is handed:
+         a listing's IslaProfile ID, and the email or member id of
+         either the reported owner or the member who filed the report.
+         One box rather than four fields, because the operator does not
+         know which of those they were given. -->
+    <form action="index.php" method="GET" role="search">
+        <input type="hidden" name="view" value="reports">
+        <input type="hidden" name="status" value="<?php echo e($statusFilter); ?>">
+        <?php if ($providerFilter > 0): ?>
+            <input type="hidden" name="provider" value="<?php echo (int) $providerFilter; ?>">
+        <?php endif; ?>
+        <label class="adm-search-field">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input type="search" name="q" value="<?php echo e($searchQuery); ?>"
+                   placeholder="Search profile ID, email or member ID…"
+                   aria-label="Search reports by profile ID, email or member ID"
+                   autocomplete="off" maxlength="120">
+        </label>
+        <button type="submit" class="btn btn-small">Search</button>
+        <?php if ($searchQuery !== ''): ?>
+            <a class="btn btn-small btn-outline" href="<?php echo e($clearSearchHref); ?>">Clear</a>
+        <?php endif; ?>
+    </form>
+
+    <?php if ($searchQuery !== ''): ?>
+        <span class="adm-search-note">
+            Showing matches for <strong><?php echo e($searchQuery); ?></strong>
+            · <?php echo count($queue); ?> found
+        </span>
+    <?php endif; ?>
+</div>
 <div class="adm-panel">
     <div class="adm-panel-head">
         <div class="adm-tabs">
             <?php foreach ($tabs as $key => $label): ?>
                 <a class="adm-tab<?php echo $statusFilter === $key ? ' is-active' : ''; ?>"
-                   href="index.php?view=reports&amp;status=<?php echo e($key); ?><?php echo $providerQuery; ?>">
+                   href="index.php?view=reports&amp;status=<?php echo e($key); ?><?php echo $tabQuery; ?>">
                     <?php echo e($label); ?>
                     <span class="adm-tab-n">
                         <?php echo $key === 'all' ? array_sum($queueCounts) : (int) $queueCounts[$key]; ?>
@@ -29,7 +72,7 @@ $providerQuery = $providerFilter > 0 ? '&amp;provider=' . (int) $providerFilter 
             <?php if ($queueListing !== null): ?>
                 <span class="adm-secondary is-flat">
                     Only <?php echo e(adm_listing_title($queueListing)); ?>
-                    <a href="index.php?view=reports&amp;status=<?php echo e($statusFilter); ?>">Clear</a>
+                    <a href="index.php?view=reports&amp;status=<?php echo e($statusFilter); ?><?php echo $searchQueryParam; ?>">Clear</a>
                 </span>
             <?php endif; ?>
             <span class="adm-secondary is-flat">Newest first &middot; <?php echo count($queue); ?> shown</span>
@@ -41,7 +84,11 @@ $providerQuery = $providerFilter > 0 ? '&amp;provider=' . (int) $providerFilter 
             <strong>No reports here.</strong>
             <?php if ($queueListing !== null): ?>
                 Nothing has been filed against this listing under this filter.
-                <a href="index.php?view=reports&amp;status=<?php echo e($statusFilter); ?>">Show the whole queue</a>.
+                <a href="index.php?view=reports&amp;status=<?php echo e($statusFilter); ?><?php echo $searchQueryParam; ?>">Show the whole queue</a>.
+            <?php elseif ($searchQuery !== ''): ?>
+                Nothing matches <strong><?php echo e($searchQuery); ?></strong> under this filter.
+                Try the <a href="index.php?view=reports&amp;status=all<?php echo $searchQueryParam; ?>">All</a> tab, or
+                <a href="index.php?view=reports&amp;status=<?php echo e($statusFilter); ?><?php echo $providerQuery; ?>">clear the search</a>.
             <?php else: ?>
                 <?php echo $statusFilter === 'pending'
                     ? 'Nothing is waiting on a decision right now.'

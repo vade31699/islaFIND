@@ -131,19 +131,32 @@
                     var empty = thread.querySelector('.chat-empty');
                     if (empty) { empty.remove(); }
 
+                    // The message-request card is pinned to the BOTTOM of the
+                    // thread, so a message that arrives later must land ABOVE
+                    // it — otherwise it would appear to predate the card.
+                    // The card itself is never built here: the poller reloads
+                    // when the request state changes (it is part of the
+                    // signature), so the server always renders that card.
+                    var tail = thread.querySelector('.hire-decision');
+
                     var shouldStick = isNearBottom();
                     msgs.forEach(function (row) {
                         // Dedupe: never double-append an id already in the DOM.
                         if (row.kind !== 'system' && parseInt(row.id, 10) <= lastMsgId) { return; }
                         if (row.kind === 'system') {
                             // System rows have no id in the payload; skip
-                            // if the same text is already the last child.
-                            var last = thread.lastElementChild;
+                            // if the same text is already the last message
+                            // on screen (the element just before the card).
+                            var last = tail ? tail.previousElementSibling : thread.lastElementChild;
                             if (last && last.classList.contains('chat-system') &&
                                 last.textContent === row.message) { return; }
                         }
                         var node = buildBubble(row);
-                        thread.appendChild(node);
+                        if (tail) {
+                            thread.insertBefore(node, tail);
+                        } else {
+                            thread.appendChild(node);
+                        }
                         if (row.kind !== 'system') {
                             var id = parseInt(row.id, 10);
                             if (id > lastMsgId) { lastMsgId = id; }
@@ -209,6 +222,16 @@
             var strong = document.createElement('strong');
             strong.textContent = row.full_name;
             meta.appendChild(strong);
+
+            // Which listing the thread is about, above the preview
+            // (same position as the server-rendered row). Kept as a
+            // text node like every other field here.
+            if (row.subject) {
+                var subject = document.createElement('span');
+                subject.className = 'chat-subject';
+                subject.textContent = '\uD83D\uDCCC ' + row.subject;
+                meta.appendChild(subject);
+            }
 
             var preview = document.createElement('span');
             preview.className = 'chat-preview';

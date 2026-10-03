@@ -53,6 +53,7 @@ if (!isset($_SESSION['user_id'])) {
 
 // --- 3. Database connection -------------------------------------
 require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/categories.php';   // isla_listing_label() — the subject of a thread
 
 // --- 4. Load the user row (validates the stored session id) -----
 $stmt = $pdo->prepare('SELECT id, full_name FROM users WHERE id = :id LIMIT 1');
@@ -230,11 +231,16 @@ if (isset($_GET['list'])) {
         $unread[(int) $r['sender_id']] = (int) $r['n'];
     }
 
-    // Hire/job tags — same maps as messenger.php.
+    // Hire/job tags — same maps and the same individual-only rule as
+    // messenger.php: a business inquiry is a trackable booking, not a
+    // hire, so it never wears a hire/job label.
     $hireTags = [];
     $stmt = $pdo->query(
-        "SELECT provider_id, client_id, status FROM service_contracts
-         WHERE status IN ('pending_hire','accepted','completed','cancelled')"
+        "SELECT sc.provider_id, sc.client_id, sc.status
+           FROM service_contracts sc
+           LEFT JOIN providers p ON p.id = sc.provider_listing_id
+          WHERE sc.status IN ('pending_hire','accepted','completed','cancelled')
+            AND (p.profile_type IS NULL OR p.profile_type <> 'business')"
     );
     foreach ($stmt->fetchAll() as $row) {
         $amProvider = (int) $row['provider_id'] === $myId;
@@ -249,6 +255,64 @@ if (isset($_GET['list'])) {
                'completed'    => ['label' => 'Job done',     'cls' => 'done'],
                'cancelled'    => ['label' => 'Cancelled',    'cls' => 'cancel']];
         $hireTags[$other] = $map[$row['status']];
+    }
+
+    // WHICH LISTING each thread is about — same rule as
+    // messenger.php's inbox: the conversation row carries the listing
+    // the inquiry was sent from, and a provider with several listings
+    // needs the subject on the row to tell them apart. A pending
+    // incoming request outranks any other row for the pair, and an
+    // id with no stored label is resolved from the listing itself in
+    // one query.
+    $convListings   = [];
+    $convListingIds = [];
+    $stmt = $pdo->prepare(
+        'SELECT provider_id, client_id, status, listing_id, listing_label
+           FROM conversations
+          WHERE provider_id = :me OR client_id = :me'
+    );
+    $stmt->execute([':me' => $myId]);
+    foreach ($stmt->fetchAll() as $cr) {
+        $other = (int) $cr['provider_id'] === $myId
+            ? (int) $cr['client_id']
+            : (int) $cr['provider_id'];
+        $isIncoming = $cr['status'] === 'pending' && (int) $cr['provider_id'] === $myId;
+        $label      = trim((string) ($cr['listing_label'] ?? ''));
+
+        if ($label !== '' && (!isset($convListings[$other]) || $isIncoming)) {
+            $convListings[$other] = $label;
+        }
+        if ((int) ($cr['listing_id'] ?? 0) > 0
+            && (!isset($convListingIds[$other]) || $isIncoming)) {
+            $convListingIds[$other] = (int) $cr['listing_id'];
+        }
+    }
+    $unresolved = [];
+    foreach ($convListingIds as $other => $lid) {
+        if (!isset($convListings[$other])) {
+            $unresolved[] = $lid;
+        }
+    }
+    if ($unresolved) {
+        $in     = implode(',', array_fill(0, count($unresolved), '?'));
+        $lookup = $pdo->prepare(
+            "SELECT id, selected_title, name, municipality FROM providers WHERE id IN ($in)"
+        );
+        $lookup->execute($unresolved);
+        $labelsById = [];
+        foreach ($lookup->fetchAll() as $lrow) {
+            $labelsById[(int) $lrow['id']] = isla_listing_label(
+                $lrow['selected_title'] ?? null,
+                $lrow['name'] ?? null,
+                $lrow['municipality'] ?? null,
+                ''
+            );
+        }
+        foreach ($convListingIds as $other => $lid) {
+            if (!isset($convListings[$other]) && !empty($labelsById[$lid])) {
+                $convListings[$other] = $labelsById[$lid];
+            }
+        }
     }
 
     // Message-request tags.
@@ -287,6 +351,7 @@ if (isset($_GET['list'])) {
             'last_sender_mine' => (int) $conv['last_sender'] === $myId,
             'last_time'  => $conv['last_time'],
             'unread'     => $unread[$otherId] ?? 0,
+            'subject'    => $convListings[$otherId] ?? null,
             'req_tag'    => $reqTags[$otherId] ?? null,
             'hire_tag'   => $hireTags[$otherId] ?? null,
         ];

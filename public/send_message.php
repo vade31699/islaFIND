@@ -32,6 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 // --- 4. Database connection ------------------------------------
 require_once __DIR__ . '/../include/db.php';
 require_once __DIR__ . '/../include/listing_visibility.php';
+require_once __DIR__ . '/../include/categories.php';   // isla_listing_label() — what the inquiry is about
 
 // --- 5. Collect + validate the fields ---------------------------
 $providerId = (int) ($_POST['provider_id'] ?? 0);
@@ -52,12 +53,16 @@ if ($providerId <= 0) {
     // profile_type is read too: the contract row below is only
     // created for INDIVIDUAL SKILLS listings — business listings are
     // inquired/chatted with but never enter the hire -> rating chain.
+    // selected_title and municipality come along so the thread can be
+    // stamped with WHAT the inquiry is about (see the conversation
+    // upsert below); a provider can own several listings and "Jane
+    // messaged you" does not say which one she is asking about.
     // Filters on the OWNER's account status as well as the listing's own
     // (include/listing_visibility.php): a new inquiry must not land on an
     // account an admin has blocked, because nobody will answer it. The
     // same rule the feed, hiring and reporting already apply.
     $stmt = $pdo->prepare(
-        'SELECT p.id, p.user_id, p.name, p.profile_type
+        'SELECT p.id, p.user_id, p.name, p.profile_type, p.selected_title, p.municipality
            FROM providers p
            ' . isla_listing_live_join() . '
           WHERE p.id = :id AND ' . isla_listing_live_where() . ' LIMIT 1'
@@ -78,7 +83,21 @@ if ($providerId <= 0) {
         // re-inquiry is just another message; if the previous
         // request was declined, this fresh inquiry re-opens it as a
         // new pending request.
+        //
+        // The thread also records WHICH listing this is about
+        // (listing_id + a rendered listing_label). A provider can own
+        // several listings, so without it the message request just
+        // says "someone wants to talk to you" — the provider cannot
+        // tell an inquiry about their electrician skill from one
+        // about their sari-sari store. Every inquiry REFRESHES these
+        // two, so the request always names the listing that was
+        // actually inquired about last.
         $providerUserId = (int) $provider['user_id'];
+        $listingLabel   = isla_listing_label(
+            $provider['selected_title'] ?? null,
+            $provider['name'] ?? null,
+            $provider['municipality'] ?? null
+        );
         $stmt = $pdo->prepare(
             'SELECT id, status FROM conversations
              WHERE provider_id = :pid AND client_id = :cid LIMIT 1'
@@ -90,17 +109,32 @@ if ($providerId <= 0) {
             $convId = (int) $conv['id'];           // existing thread
             // Not an open chat yet? This inquiry is a new (or
             // renewed) message request awaiting the provider.
-            if ($conv['status'] !== 'accepted') {
-                $stmt = $pdo->prepare(
-                    "UPDATE conversations SET status = 'pending' WHERE id = :id"
-                );
-                $stmt->execute([':id' => $convId]);
-            }
+            // The listing stamp is written either way: an accepted
+            // thread keeps working, but the subject line must now
+            // name the listing this inquiry is about.
+            $stmt = $pdo->prepare(
+                "UPDATE conversations
+                    SET status = CASE WHEN status = 'accepted' THEN status ELSE 'pending' END,
+                        listing_id = :lid,
+                        listing_label = :label
+                  WHERE id = :id"
+            );
+            $stmt->execute([
+                ':lid'   => (int) $provider['id'],
+                ':label' => $listingLabel,
+                ':id'    => $convId,
+            ]);
         } else {
             $stmt = $pdo->prepare(
-                "INSERT INTO conversations (provider_id, client_id, status) VALUES (:pid, :cid, 'pending')"
+                "INSERT INTO conversations (provider_id, client_id, status, listing_id, listing_label)
+                 VALUES (:pid, :cid, 'pending', :lid, :label)"
             );
-            $stmt->execute([':pid' => $providerUserId, ':cid' => $clientId]);
+            $stmt->execute([
+                ':pid'   => $providerUserId,
+                ':cid'   => $clientId,
+                ':lid'   => (int) $provider['id'],
+                ':label' => $listingLabel,
+            ]);
             $convId = (int) $pdo->lastInsertId(); // fresh pending request
         }
 
@@ -122,29 +156,36 @@ if ($providerId <= 0) {
         // deleted stays hidden from THEM; the provider keeps their
         // full copy until they delete it too.
 
-        // --- 9. Record a service contract (pending hire) --------
-        // This is what later unlocks the rating: once the provider
-        // marks it completed, the client may submit a review. It is
-        // created ONLY for INDIVIDUAL SKILLS listings — business
-        // profiles are inquired about and chatted with, but never
-        // enter the hire -> job -> rating chain (the HIRE! button,
-        // ACCEPT/DECLINE and JOB DONE are all individual-only).
+        // --- 9. Record a service contract (pending inquiry) -----
+        // This is what makes an inquiry TRACKABLE: it gives the
+        // provider a row under My Jobs the moment someone asks about
+        // the listing, instead of the inquiry existing only as a chat
+        // bubble.
+        //
+        // It is recorded for EVERY listing type:
+        //   - INDIVIDUAL SKILLS -> the job that later runs through the
+        //     hire -> accept -> completed -> rating chain (the HIRE!,
+        //     ACCEPT/DECLINE and JOB DONE controls are all
+        //     individual-only).
+        //   - BUSINESS -> a BOOKING the owner can track and close out.
+        //     Businesses are never "hired" and never rated, so a
+        //     business contract stops at pending/completed; the rating
+        //     prompt and rate_service.php deliberately refuse it (see
+        //     dashboard.php and rate_service.php).
         // provider_listing_id pins the contract to THIS exact
         // listing (providers.id): a person can own many listings,
-        // and only the one the client actually hired may be rated.
-        if (($provider['profile_type'] ?? '') === 'individual') {
-            $stmt = $pdo->prepare(
-                'INSERT INTO service_contracts (provider_id, provider_listing_id, client_id, status)
-                 VALUES (:pid, :lid, :cid, :st)
-                 ON DUPLICATE KEY UPDATE id = id'
-            );
-            $stmt->execute([
-                ':pid' => $providerUserId,
-                ':lid' => (int) $provider['id'],
-                ':cid' => $clientId,
-                ':st'  => 'pending',
-            ]);
-        }
+        // and only the one the client actually asked about is tracked.
+        $stmt = $pdo->prepare(
+            'INSERT INTO service_contracts (provider_id, provider_listing_id, client_id, status)
+             VALUES (:pid, :lid, :cid, :st)
+             ON DUPLICATE KEY UPDATE id = id'
+        );
+        $stmt->execute([
+            ':pid' => $providerUserId,
+            ':lid' => (int) $provider['id'],
+            ':cid' => $clientId,
+            ':st'  => 'pending',
+        ]);
 
         // --- 10. Feed the recommendation engine -----------------
         $stmt = $pdo->prepare(

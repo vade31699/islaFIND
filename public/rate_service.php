@@ -52,7 +52,8 @@ if ($rating < 1 || $rating > 5) {
     // A job that is not at one of these stages cannot be rated,
     // and it must not already carry a review.
     $stmt = $pdo->prepare(
-        'SELECT sc.*, p.id AS provider_listing_id, p.user_id AS provider_user_id
+        'SELECT sc.*, p.id AS provider_listing_id, p.user_id AS provider_user_id,
+                p.profile_type AS listing_profile_type
          FROM service_contracts sc
          JOIN providers p ON p.id = sc.provider_listing_id
          WHERE sc.id = :cid AND sc.client_id = :me
@@ -63,6 +64,12 @@ if ($rating < 1 || $rating > 5) {
 
     if (!$contract) {
         $flash['msg'] = 'No such job found for your account.';
+    } elseif (($contract['listing_profile_type'] ?? '') === 'business') {
+        // A business inquiry is a trackable BOOKING, not a hire. It never
+        // enters the rating chain, so even a crafted request cannot rate
+        // one — the same rule the dashboard's rating prompt already
+        // enforces by only ever listing individual skills jobs.
+        $flash['msg'] = 'Business bookings are not rated.';
     } elseif (!in_array($contract['status'], ['accepted', 'completed'], true)) {
         // A pending / pending_hire / declined / cancelled job
         // cannot be rated yet.

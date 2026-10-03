@@ -277,6 +277,38 @@ function isla_ensure_schema(PDO $pdo): void
         );
 
         // ------------------------------------------------------------------
+        // conversations.listing_id + listing_label — what an inquiry is ABOUT
+        //
+        // A conversation row is per PAIR (one thread per provider and
+        // client), but a member can own several listings, so "Jane messaged
+        // you" does not say which of them she is asking about. These two
+        // columns remember the listing an inquiry was sent from; the
+        // messenger then renders its label ("Electrician, Santa Fe") on the
+        // thread, the message request and the inbox row.
+        //
+        // Added here as well as in final_app.sql because CREATE TABLE IF NOT
+        // EXISTS is a no-op on an existing database, so an existing
+        // deployment would never pick the columns up from the dump. Both are
+        // NULL-able and every row that predates them simply has no label —
+        // the messenger then falls back to the provider's name, which is what
+        // it showed before.
+        //
+        // There is deliberately NO foreign key on listing_id: deleting a
+        // listing must not delete a conversation that holds messages, and
+        // the label is stored as text precisely so a thread can still say
+        // what it was about afterwards — which leaves a stale id inert.
+        // ------------------------------------------------------------------
+        if (!isla_schema_has_column($pdo, 'conversations', 'listing_id')) {
+            $pdo->exec('ALTER TABLE conversations ADD COLUMN listing_id INT UNSIGNED NULL AFTER client_id');
+        }
+        if (!isla_schema_has_column($pdo, 'conversations', 'listing_label')) {
+            $pdo->exec('ALTER TABLE conversations ADD COLUMN listing_label VARCHAR(160) NULL AFTER listing_id');
+        }
+        if (!isla_schema_has_index($pdo, 'conversations', 'idx_conv_listing')) {
+            $pdo->exec('ALTER TABLE conversations ADD KEY idx_conv_listing (listing_id)');
+        }
+
+        // ------------------------------------------------------------------
         // providers.profile_code — the public "IslaProfile ID"
         //
         // Every listing gets a stable reference an admin can quote over the

@@ -138,6 +138,77 @@ function adm_listing_title(array $row): string
     return $label . ($place !== '' ? ', ' . $place : '');
 }
 
+/**
+ * adm_report_search_where(): string
+ * The WHERE fragment behind the queue's search box, as a reusable
+ * string so the row query and the tab counters cannot drift apart.
+ *
+ * WHAT IT MATCHES — the four things an operator is handed when a
+ * report is escalated to them:
+ *
+ *   p.profile_code   the listing's IslaProfile ID (ISLA-000142), or
+ *                    its bare number (142) so the zero padding does
+ *                    not have to be typed from memory
+ *   p.id             the listing's internal id
+ *   o.email          the REPORTED listing's owner email
+ *   o.user_id        the owner's public member id
+ *   u.email          the REPORTING member's email
+ *   u.user_id        the reporting member's public member id
+ *
+ * Both sides are searched on purpose: "search the report for this
+ * person" and "search the reports this person filed" are the same
+ * question asked from two ends, and which one the operator means is
+ * obvious from the result, not from the form.
+ *
+ * The placeholders are named, so the fragment can be merged into a
+ * query that already has its own parameters. They must stay in step
+ * with adm_report_search_params().
+ *
+ * @return string SQL condition, placeholders included.
+ */
+function adm_report_search_where(): string
+{
+    return "(
+        p.profile_code LIKE :q_like
+        OR o.email     LIKE :q_like
+        OR u.email     LIKE :q_like
+        OR CAST(o.user_id AS CHAR) = :q_exact
+        OR CAST(u.user_id AS CHAR) = :q_exact
+        OR CAST(p.id      AS CHAR) = :q_exact
+    )";
+}
+
+/**
+ * adm_report_search_params(string $query): array
+ * The bound values for adm_report_search_where().
+ *
+ * LIKE is fed '%term%' so a partial email or a partial code finds its
+ * row; the exact terms are fed the bare digits only, because a member
+ * id is an identity, not a fragment — "2" must not match member 42.
+ * The `ISLA-` prefix is stripped from the exact form so both
+ * "ISLA-000142" and "142" reach the same row.
+ *
+ * The LIKE wildcards are escaped out of the term itself, so a member
+ * whose email contains a % or _ cannot turn the search into a wildcard
+ * sweep of the whole queue.
+ *
+ * @param string $query Raw, already trimmed search text.
+ * @return array<string, string> Named parameters for the fragment.
+ */
+function adm_report_search_params(string $query): array
+{
+    $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $query);
+
+    // The digits of an "ISLA-000142"-style code, so the id columns can
+    // be matched exactly without the padding.
+    $digits = preg_replace('/[^0-9]/', '', $query);
+
+    return [
+        ':q_like'  => '%' . $escaped . '%',
+        ':q_exact' => $digits === '' ? '\0' : $digits,
+    ];
+}
+
 // ------------------------------------------------------------
 // 5a. Overview data
 // ------------------------------------------------------------
@@ -188,6 +259,18 @@ if (!in_array($statusFilter, ['pending', 'resolved', 'dismissed', 'all'], true))
 // Optional narrowing to one listing.
 $providerFilter = (int) ($_GET['provider'] ?? 0);
 
+// Optional free-text search. Matches a listing's IslaProfile ID
+// (ISLA-000142), the reported listing's OWNER email or member id, and
+// the REPORTING member's email or member id — the four things an
+// operator is handed when someone phones in about a report. It is
+// deliberately one box rather than four fields: the operator does not
+// know which of those they were given, and typing it once is the whole
+// point. Trimmed and capped so a pasted novel cannot bloat the query.
+$searchQuery = trim((string) ($_GET['q'] ?? ''));
+if (strlen($searchQuery) > 120) {
+    $searchQuery = substr($searchQuery, 0, 120);
+}
+
 $queue = [];
 $queueCounts = ['pending' => 0, 'resolved' => 0, 'dismissed' => 0];
 $queueListing = null;
@@ -209,15 +292,34 @@ if ($view === 'reports') {
         }
     }
 
-    // Tab counters, scoped to the listing when one is chosen.
-    if ($providerFilter > 0) {
-        $stmt = $pdo->prepare(
-            'SELECT status, COUNT(*) AS n
-               FROM profile_reports
-              WHERE provider_id = :pid
-              GROUP BY status'
-        );
-        $stmt->execute([':pid' => $providerFilter]);
+    // Tab counters, scoped to the listing and/or the search term when
+    // one is set — a count that ignored the search would promise rows
+    // the table below is not going to show.
+    if ($providerFilter > 0 || $searchQuery !== '') {
+        // The same joins and the same WHERE fragment the row query
+        // below uses, built by the one helper — so a count can never
+        // disagree with what the table renders.
+        $countSql = 'SELECT r.status, COUNT(*) AS n
+                       FROM profile_reports r
+                       JOIN providers p ON p.id = r.provider_id
+                       JOIN users     u ON u.id = r.reporter_id
+                       JOIN users     o ON o.id = p.user_id';
+        $countParams = [];
+        $countWhere  = [];
+
+        if ($providerFilter > 0) {
+            $countWhere[] = 'r.provider_id = :pid';
+            $countParams[':pid'] = $providerFilter;
+        }
+        if ($searchQuery !== '') {
+            $countWhere[] = adm_report_search_where();
+            $countParams += adm_report_search_params($searchQuery);
+        }
+
+        $countSql .= ' WHERE ' . implode(' AND ', $countWhere) . ' GROUP BY r.status';
+
+        $stmt = $pdo->prepare($countSql);
+        $stmt->execute($countParams);
         foreach ($stmt->fetchAll() as $row) {
             $queueCounts[$row['status']] = (int) $row['n'];
         }
@@ -251,6 +353,10 @@ if ($view === 'reports') {
     if ($providerFilter > 0) {
         $where[] = 'r.provider_id = :pid';
         $params[':pid'] = $providerFilter;
+    }
+    if ($searchQuery !== '') {
+        $where[] = adm_report_search_where();
+        $params += adm_report_search_params($searchQuery);
     }
     if (!empty($where)) {
         $sql .= ' WHERE ' . implode(' AND ', $where);

@@ -25,6 +25,7 @@ if (!isset($_SESSION['user_id'])) {
 
 // --- 3. Database connection ------------------------------------
 require_once __DIR__ . '/../include/db.php';
+require_once __DIR__ . '/../include/categories.php';   // isla_listing_label() — what an inquiry is about
 
 // --- 4. Load the current user ----------------------------------
 $stmt = $pdo->prepare('SELECT * FROM users WHERE id = :id LIMIT 1');
@@ -160,6 +161,15 @@ $workerContract  = null;  // contract where I am the WORKER (they hired me)
 $workerContractId = 0;
 $clientContract  = null;  // contract where I am the CLIENT (I hired them)
 
+// WHAT THE THREAD IS ABOUT, for the header subtitle. A conversation
+// row is per PAIR, but a member can own several listings, so the row
+// also carries the listing the inquiry was sent from (listing_id +
+// listing_label). It is filled below from the conversation row; when
+// there is none (a direct "New Message" chat, or a thread that
+// predates the column) the header shows the provider's own name, so
+// the subtitle never renders an empty line.
+$threadSubject = '';
+
 if ($chatWith > 0 && $chatWith !== $myId) {
     $stmt = $pdo->prepare('SELECT id, full_name, profile_picture FROM users WHERE id = :id LIMIT 1');
     $stmt->execute([':id' => $chatWith]);
@@ -177,7 +187,8 @@ if ($chatWith > 0 && $chatWith !== $myId) {
     $myRequestStatus    = null;
     $theirRequestStatus = null;
     $stmt = $pdo->prepare(
-        'SELECT id, provider_id, client_id, status FROM conversations
+        'SELECT id, provider_id, client_id, status, listing_id, listing_label
+           FROM conversations
          WHERE (provider_id = :me AND client_id = :other)
             OR (provider_id = :other AND client_id = :me)
          ORDER BY id LIMIT 2'
@@ -191,6 +202,44 @@ if ($chatWith > 0 && $chatWith !== $myId) {
         } else {
             // I am the provider -> this is THEIR request to me.
             $theirRequestStatus = $cr['status'];
+        }
+
+        // The listing this thread is about. A pair can have a row in
+        // EACH direction (each person inquired on the other's
+        // profile), and each direction carries its own listing — so
+        // the row matching the direction whose request is live wins:
+        // a pending incoming request is what the provider is being
+        // asked to decide on, and an accepted one is what the chat
+        // is about. Only one of the two is ever rendered, because
+        // only one is the subject of the thread being read.
+        $label = trim((string) ($cr['listing_label'] ?? ''));
+        if ($label === '' && (int) ($cr['listing_id'] ?? 0) > 0) {
+            // A row written before listing_label existed (or by hand):
+            // resolve the label from the listing itself. The listing
+            // may be gone, in which case the header simply shows the
+            // provider's name.
+            $stmt2 = $pdo->prepare(
+                'SELECT selected_title, name, municipality FROM providers WHERE id = :id LIMIT 1'
+            );
+            $stmt2->execute([':id' => (int) $cr['listing_id']]);
+            if ($lrow = $stmt2->fetch()) {
+                $label = isla_listing_label(
+                    $lrow['selected_title'] ?? null,
+                    $lrow['name'] ?? null,
+                    $lrow['municipality'] ?? null,
+                    ''
+                );
+            }
+        }
+
+        if ($label !== '') {
+            // Prefer the direction that is awaiting a decision, then
+            // any other stamped direction.
+            $isIncoming = $cr['status'] === 'pending'
+                && (int) $cr['provider_id'] === $myId;
+            if ($threadSubject === '' || $isIncoming) {
+                $threadSubject = $label;
+            }
         }
     }
 
@@ -356,14 +405,87 @@ foreach ($rows->fetchAll() as $r) {
     $unread[(int) $r['sender_id']] = (int) $r['n'];
 }
 
+// WHICH LISTING each conversation is about, for the inbox rows.
+// One lookup for every thread I am part of, keyed by the other person,
+// so an inbox row can say what the thread is about ("Electrician,
+// Santa Fe") under the name. A provider can own several listings, so
+// two people inquiring about two different skills would otherwise
+// read as two identical "New message" rows.
+$convListings   = [];   // other user id => label
+$convListingIds = [];   // other user id => listing id (for the resolve pass)
+$stmt = $pdo->prepare(
+    'SELECT provider_id, client_id, status, listing_id, listing_label
+       FROM conversations
+      WHERE provider_id = :me OR client_id = :me'
+);
+$stmt->execute([':me' => $myId]);
+foreach ($stmt->fetchAll() as $cr) {
+    $other = (int) $cr['provider_id'] === $myId
+        ? (int) $cr['client_id']
+        : (int) $cr['provider_id'];
+    // A pair can have a row in EACH direction; a pending incoming
+    // request (one I have to decide on) is the one worth naming.
+    $isIncoming = $cr['status'] === 'pending' && (int) $cr['provider_id'] === $myId;
+    $label      = trim((string) ($cr['listing_label'] ?? ''));
+
+    if ($label !== ''
+        && (!isset($convListings[$other]) || $isIncoming)) {
+        $convListings[$other] = $label;
+    }
+    if ((int) ($cr['listing_id'] ?? 0) > 0
+        && (!isset($convListingIds[$other]) || $isIncoming)) {
+        $convListingIds[$other] = (int) $cr['listing_id'];
+    }
+}
+
+// Rows written before listing_label existed (or by hand) have an id
+// but no label: resolve them from the listings themselves, in ONE
+// query rather than one per row. A listing that has since been
+// deleted simply stays unnamed.
+$unresolved = [];
+foreach ($convListingIds as $other => $lid) {
+    if (!isset($convListings[$other])) {
+        $unresolved[] = $lid;
+    }
+}
+if ($unresolved) {
+    $in     = implode(',', array_fill(0, count($unresolved), '?'));
+    $lookup = $pdo->prepare(
+        "SELECT id, selected_title, name, municipality FROM providers WHERE id IN ($in)"
+    );
+    $lookup->execute($unresolved);
+    $labelsById = [];
+    foreach ($lookup->fetchAll() as $lrow) {
+        $labelsById[(int) $lrow['id']] = isla_listing_label(
+            $lrow['selected_title'] ?? null,
+            $lrow['name'] ?? null,
+            $lrow['municipality'] ?? null,
+            ''
+        );
+    }
+    foreach ($convListingIds as $other => $lid) {
+        if (!isset($convListings[$other]) && !empty($labelsById[$lid])) {
+            $convListings[$other] = $labelsById[$lid];
+        }
+    }
+}
+
 // HIRE/job tags for the conversation list: every active job state
 // (hire request, on the job, done, cancelled) gets a small label
 // next to the conversation with that person, so the job status is
 // spotted in the inbox without opening every thread.
+//
+// Only INDIVIDUAL SKILLS contracts are tagged. A business inquiry is
+// a trackable BOOKING, never a hire, so it must not wear a
+// "Hire request" / "On the Job" label — the listing's own name in the
+// thread subject already says what it is about.
 $hireTags = [];
 $stmt = $pdo->query(
-    "SELECT provider_id, client_id, status FROM service_contracts
-     WHERE status IN ('pending_hire','accepted','completed','cancelled')"
+    "SELECT sc.provider_id, sc.client_id, sc.status
+       FROM service_contracts sc
+       LEFT JOIN providers p ON p.id = sc.provider_listing_id
+      WHERE sc.status IN ('pending_hire','accepted','completed','cancelled')
+        AND (p.profile_type IS NULL OR p.profile_type <> 'business')"
 );
 foreach ($stmt->fetchAll() as $row) {
     $amProvider = (int) $row['provider_id'] === $myId;
@@ -427,6 +549,14 @@ if ($otherUser) {
     $headerTitle = htmlspecialchars($otherUser['full_name']);
     $headerBack  = 'messenger.php'; // thread view: back to the list
     $headerBackLabel = 'Messages';
+
+    // The subtitle names WHAT the thread is about, so the provider
+    // knows which of their listings is being asked about before they
+    // read a single bubble. Falls back to the person's own name when
+    // there is no listing (a direct chat) — never a blank line.
+    $headerSubtitle = $threadSubject !== ''
+        ? htmlspecialchars($threadSubject)
+        : 'islaFIND member';
 }
 ?>
 <!DOCTYPE html>
@@ -448,7 +578,17 @@ include __DIR__ . '/../include/head_meta.php';
         <a href="<?php echo $headerBack; ?>" class="chat-back" aria-label="<?php echo htmlspecialchars($headerBackLabel); ?>">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
         </a>
-        <span class="app-header-title"><?php echo $headerTitle; ?></span>
+        <!-- The person AND what the thread is about, as one block on the
+             left. The name alone does not identify the thread: a
+             conversation is per PAIR, but a provider can own several
+             listings, so two inquiries read as the same name twice
+             unless the subject is on the header too. -->
+        <span class="app-header-id">
+            <span class="app-header-title"><?php echo $headerTitle; ?></span>
+            <?php if ($otherUser): ?>
+                <span class="app-header-sub" title="The listing this conversation is about"><?php echo $headerSubtitle; ?></span>
+            <?php endif; ?>
+        </span>
 
         <?php if (!$otherUser && $conversations): ?>
             <!-- Top-right settings gear (inbox view only). Toggles
@@ -520,11 +660,19 @@ include __DIR__ . '/../include/head_meta.php';
                          - Provider side: Accept / Decline buttons.
                          - Client side: "waiting for acceptance". -->
                     <?php if ($theirRequestStatus === 'pending'): ?>
-                        <!-- I am the PROVIDER: they asked to talk. -->
+                        <!-- I am the PROVIDER: they asked to talk. The
+                             listing they are asking about is named on
+                             the card itself, because that is the
+                             question being decided here. -->
                         <div class="msg-request">
                             <div class="msg-request-icon" aria-hidden="true">&#128172;</div>
                             <div class="msg-request-body">
                                 <strong><?php echo htmlspecialchars($otherUser['full_name']); ?> sent you a message request</strong>
+                                <?php if ($threadSubject !== ''): ?>
+                                    <p class="msg-request-subject">
+                                        About: <span><?php echo htmlspecialchars($threadSubject); ?></span>
+                                    </p>
+                                <?php endif; ?>
                                 <p>They want to talk about your service. Accept to open the chat, or decline.</p>
                                 <div class="msg-request-actions">
                                     <form action="hire_action.php" method="POST">
@@ -548,6 +696,11 @@ include __DIR__ . '/../include/head_meta.php';
                             <div class="msg-request-icon" aria-hidden="true">&#128197;</div>
                             <div class="msg-request-body">
                                 <strong>Message request sent</strong>
+                                <?php if ($threadSubject !== ''): ?>
+                                    <p class="msg-request-subject">
+                                        About: <span><?php echo htmlspecialchars($threadSubject); ?></span>
+                                    </p>
+                                <?php endif; ?>
                                 <p>Waiting for <?php echo htmlspecialchars($otherUser['full_name']); ?> to accept your message request. You can talk about the job once they accept.</p>
                             </div>
                         </div>
@@ -564,37 +717,20 @@ include __DIR__ . '/../include/head_meta.php';
                 <?php else: ?>
                     <!-- ======== OPEN CHAT ======== -->
 
-                    <?php if ($theirRequestStatus === 'pending'): ?>
-                        <!-- Reverse-direction message request: the thread
-                             is already open (I accepted THEIR request
-                             earlier), but they have now sent a NEW request
-                             the other way — e.g. Claire inquiring Dave's
-                             profile. Show a compact Accept/Decline banner
-                             so THIS direction can open too, without
-                             locking the existing chat. -->
-                        <div class="hire-decision">
-                            <strong>&#128172; <?php echo htmlspecialchars($otherUser['full_name']); ?> sent you a message request</strong>
-                            <div class="hire-decision-actions">
-                                <form action="hire_action.php" method="POST">
-                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
-                                    <input type="hidden" name="action" value="accept_request">
-                                    <input type="hidden" name="client_id" value="<?php echo (int) $otherUser['id']; ?>">
-                                    <button type="submit" class="btn btn-small btn-accept">Accept</button>
-                                </form>
-                                <form action="hire_action.php" method="POST">
-                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
-                                    <input type="hidden" name="action" value="decline_request">
-                                    <input type="hidden" name="client_id" value="<?php echo (int) $otherUser['id']; ?>">
-                                    <button type="submit" class="btn btn-small btn-decline">Decline</button>
-                                </form>
-                            </div>
-                        </div>
-                    <?php endif; ?>
-
                     <?php if ($freshConv): ?>
                         <!-- Banner shown right after an "Inquire Availability"
-                             created this thread (the inquiry message is below). -->
-                        <p class="chat-banner">You sent an inquiry to <?php echo htmlspecialchars($otherUser['full_name']); ?> — wait for their reply here.</p>
+                             created this thread (the inquiry message is below).
+                             It names the listing the inquiry is about, so the
+                             sender can see the message landed on the RIGHT
+                             profile — a member with several listings is the
+                             reason this matters. -->
+                        <p class="chat-banner">
+                            You sent an inquiry to <?php echo htmlspecialchars($otherUser['full_name']); ?>
+                            <?php if ($threadSubject !== ''): ?>
+                                about <strong><?php echo htmlspecialchars($threadSubject); ?></strong>
+                            <?php endif; ?>
+                            — wait for their reply here.
+                        </p>
                     <?php endif; ?>
 
                     <?php if (!$messages): ?>
@@ -711,6 +847,40 @@ include __DIR__ . '/../include/head_meta.php';
                         <p class="chat-banner">You cancelled this job.</p>
                     <?php elseif ($clientContract && $clientContract['status'] === 'completed'): ?>
                         <p class="chat-banner chat-banner-onthejob">&#10003; Job completed<?php echo (int) ($clientContract['is_rated'] ?? 0) === 1 ? ' — you rated this service' : ''; ?>.</p>
+                    <?php endif; ?>
+
+                    <?php if ($theirRequestStatus === 'pending'): ?>
+                        <!-- Reverse-direction message request, pinned to the
+                             BOTTOM of the thread (after the newest message):
+                             the thread is already open (I accepted THEIR
+                             request earlier), but they have now sent a NEW
+                             request the other way — e.g. Claire inquiring
+                             Dave's profile. Sitting last means it reads as the
+                             newest thing in the conversation rather than an
+                             announcement the messages scrolled past, while
+                             still offering Accept/Decline so THIS direction
+                             can open too, without locking the existing
+                             chat. -->
+                        <div class="hire-decision">
+                            <strong>&#128172; <?php echo htmlspecialchars($otherUser['full_name']); ?> sent you a message request</strong>
+                            <?php if ($threadSubject !== ''): ?>
+                                <p class="hire-decision-subject">About: <?php echo htmlspecialchars($threadSubject); ?></p>
+                            <?php endif; ?>
+                            <div class="hire-decision-actions">
+                                <form action="hire_action.php" method="POST">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                    <input type="hidden" name="action" value="accept_request">
+                                    <input type="hidden" name="client_id" value="<?php echo (int) $otherUser['id']; ?>">
+                                    <button type="submit" class="btn btn-small btn-accept">Accept</button>
+                                </form>
+                                <form action="hire_action.php" method="POST">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                    <input type="hidden" name="action" value="decline_request">
+                                    <input type="hidden" name="client_id" value="<?php echo (int) $otherUser['id']; ?>">
+                                    <button type="submit" class="btn btn-small btn-decline">Decline</button>
+                                </form>
+                            </div>
+                        </div>
                     <?php endif; ?>
                 <?php endif; ?>
             </div>
@@ -888,6 +1058,15 @@ include __DIR__ . '/../include/head_meta.php';
                                 <span class="chat-avatar"><?php echo htmlspecialchars(initialsOf($conv['full_name'])); ?></span>
                                 <span class="chat-meta">
                                     <strong><?php echo htmlspecialchars($conv['full_name']); ?></strong>
+                                    <?php if (!empty($convListings[$otherId])): ?>
+                                        <!-- Which listing this thread is about,
+                                             above the message preview: the
+                                             subject is what tells two rows
+                                             from the same person apart. -->
+                                        <span class="chat-subject">
+                                            &#128204; <?php echo htmlspecialchars($convListings[$otherId]); ?>
+                                        </span>
+                                    <?php endif; ?>
                                     <span class="chat-preview">
                                         <?php if ((int) $conv['last_sender'] === $myId): ?>You: <?php endif; ?>
                                         <?php echo htmlspecialchars($conv['last_message']); ?>

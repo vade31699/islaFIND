@@ -171,6 +171,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
             $errors['isla'] = 'Invalid job status.';
         } else {
             // The contract must belong to THIS user as the provider.
+            // The listing's type is read alongside the update so the
+            // confirmation can tell a completed individual skills job
+            // (which unlocks the client's rating prompt) from a
+            // completed business booking (which is never rated).
             $stmt = $pdo->prepare(
                 'UPDATE service_contracts
                  SET status = :status
@@ -182,10 +186,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
                 ':uid'    => $user['id'],
             ]);
             if ($stmt->rowCount() > 0) {
-                // A completed job unlocks the client's rating prompt.
-                $messages['isla'] = $newStatus === 'completed'
-                    ? 'Job marked completed — the client can now rate your service.'
-                    : 'Job status updated.';
+                $stmt = $pdo->prepare(
+                    'SELECT p.profile_type
+                       FROM service_contracts sc
+                       LEFT JOIN providers p ON p.id = sc.provider_listing_id
+                      WHERE sc.id = :id LIMIT 1'
+                );
+                $stmt->execute([':id' => $contractId]);
+                $isBusinessBooking = (string) $stmt->fetchColumn() === 'business';
+
+                if ($newStatus === 'completed' && !$isBusinessBooking) {
+                    // A completed individual skills job unlocks the
+                    // client's rating prompt.
+                    $messages['isla'] = 'Job marked completed — the client can now rate your service.';
+                } elseif ($newStatus === 'completed') {
+                    $messages['isla'] = 'Booking marked completed.';
+                } else {
+                    $messages['isla'] = 'Job status updated.';
+                }
             } else {
                 $errors['isla'] = 'Job not found.';
             }
@@ -454,10 +472,21 @@ foreach ($myProviders as $mp) {
 
 // --- 7b. Load the user's service contracts -----------------------
 // As a PROVIDER: the jobs they must manage (pending -> completed).
+// The listing each job is pinned to comes along (LEFT JOIN, because a
+// legacy contract may have no listing at all): an owner with several
+// listings has to know WHICH of them a job is for before they answer
+// it — a client name alone does not say. The label is built with
+// isla_listing_label(), the same function the messenger uses, so a job
+// and the chat that created it never disagree about what it is for.
 $stmt = $pdo->prepare(
-    'SELECT sc.*, u.full_name AS client_name
+    'SELECT sc.*, u.full_name AS client_name,
+            lp.selected_title AS listing_title,
+            lp.name           AS listing_name,
+            lp.municipality   AS listing_municipality,
+            lp.profile_type   AS listing_profile_type
      FROM service_contracts sc
      JOIN users u ON u.id = sc.client_id
+     LEFT JOIN providers lp ON lp.id = sc.provider_listing_id
      WHERE sc.provider_id = :uid
      ORDER BY sc.created_at DESC'
 );
@@ -478,6 +507,12 @@ $myContracts = $stmt->fetchAll();
 // the account name for individual skills listings (providers.name
 // is NULL there — only businesses set their own name), so the
 // prompt never shows a blank label.
+//
+// The join is narrowed to INDIVIDUAL SKILLS listings on purpose: a
+// business inquiry is a trackable booking, not a hire, and it never
+// enters the hire -> rating chain. A completed booking must therefore
+// NOT raise a "rate this service" prompt for the client — only a
+// completed individual skills job does.
 $stmt = $pdo->prepare(
     'SELECT sc.*, p.id AS provider_listing_id,
             COALESCE(NULLIF(p.name, \'\'), u.full_name) AS provider_name,
@@ -486,6 +521,7 @@ $stmt = $pdo->prepare(
      JOIN providers p ON p.id = sc.provider_listing_id
      JOIN users u ON u.id = sc.provider_id
      WHERE sc.client_id = :uid AND sc.status = \'completed\' AND sc.is_rated = 0
+       AND p.profile_type = \'individual\'
      ORDER BY sc.created_at DESC'
 );
 $stmt->execute([':uid' => $user['id']]);
@@ -2089,15 +2125,61 @@ include __DIR__ . '/../include/head_meta.php';
                         <?php endif; ?>
 
                         <?php if (!$myContracts): ?>
-                            <p class="sec-hint">No jobs yet — when someone inquires about your service, a job is created here. Mark it completed to let them rate you.</p>
+                            <p class="sec-hint">Nothing here yet — when someone inquires about one of your listings, it appears here so you can track it. Individual skills jobs can be completed to unlock a rating; business bookings are tracked to completion too.</p>
                         <?php else: ?>
                             <ul class="inquiry-list">
                                 <?php foreach ($myContracts as $job): ?>
+                                    <?php
+                                    // Which listing this job is for. Empty for a
+                                    // legacy contract with no listing (or one whose
+                                    // listing was deleted): the row then reads
+                                    // exactly as it did before this line existed.
+                                    $jobListing = isla_listing_label(
+                                        $job['listing_title'] ?? null,
+                                        $job['listing_name'] ?? null,
+                                        $job['listing_municipality'] ?? null,
+                                        ''
+                                    );
+                                    // A BUSINESS inquiry is a BOOKING, not a hire:
+                                    // it is trackable here, but it never enters the
+                                    // HIRE!/ACCEPT/DECLINE or rating chain, so its
+                                    // rows read (and act) differently from an
+                                    // individual skills job.
+                                    $isBusinessJob = ($job['listing_profile_type'] ?? '') === 'business';
+                                    ?>
                                     <li class="inquiry-item">
                                         <div class="inquiry-meta">
                                             <strong><?php echo htmlspecialchars($job['client_name']); ?></strong>
                                             <span><?php echo htmlspecialchars(date('M j, Y', strtotime($job['created_at']))); ?></span>
                                         </div>
+                                        <?php if ($jobListing !== ''): ?>
+                                            <p class="inquiry-subject">&#128204; <?php echo htmlspecialchars($jobListing); ?></p>
+                                        <?php endif; ?>
+                                        <?php if ($isBusinessJob): ?>
+                                            <!-- ===== BUSINESS BOOKING =====
+                                                 A trackable inquiry, never a hire.
+                                                 Status is worded for a booking and
+                                                 the only action is closing it out;
+                                                 there is no accept/decline and no
+                                                 rating. -->
+                                            <div class="inquiry-foot">
+                                                <?php if ($job['status'] === 'completed'): ?>
+                                                    <span class="inquiry-status st-completed">Booking completed</span>
+                                                <?php elseif ($job['status'] === 'cancelled'): ?>
+                                                    <span class="inquiry-status st-cancelled">Booking cancelled</span>
+                                                <?php else: ?>
+                                                    <span class="inquiry-status st-pending">Booking inquiry</span>
+                                                    <div class="inquiry-form">
+                                                        <form action="dashboard.php" method="POST">
+                                                            <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                                                            <input type="hidden" name="contract_id" value="<?php echo (int) $job['id']; ?>">
+                                                            <input type="hidden" name="contract_status" value="completed">
+                                                            <button type="submit" name="update_contract" value="1" class="btn btn-small">Mark Completed</button>
+                                                        </form>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
+                                        <?php else: ?>
                                         <div class="inquiry-foot">
                                             <span class="inquiry-status st-<?php echo htmlspecialchars($job['status']); ?>"><?php echo ucfirst(str_replace('_', ' ', htmlspecialchars($job['status']))); ?></span>
                                             <?php if ($job['status'] === 'pending_hire'): ?>
@@ -2134,6 +2216,7 @@ include __DIR__ . '/../include/head_meta.php';
                                                 <span class="sec-hint" style="margin:0">Waiting for the client to send a hire request from the chat.</span>
                                             <?php endif; ?>
                                         </div>
+                                        <?php endif; ?>
                                     </li>
                                 <?php endforeach; ?>
                             </ul>
