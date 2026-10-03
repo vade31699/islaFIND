@@ -102,18 +102,61 @@ if ($action === 'hire') {
         // The messenger's HIRE! button knows the PROVIDER USER, not
         // which of their listings is being hired. A user can own many
         // islaFIND profiles, and only the exact listing the client
-        // hired may be rated later. Resolve the listing id: prefer
-        // the one tied to this pair's most recent contract (created
-        // by the inquiry that opened this chat), falling back to the
-        // provider's latest individual listing.
+        // hired may be rated later.
+        //
+        // Resolve the listing id in order of how certainly it is the
+        // listing this thread is about:
+        //   1. the listing the conversation is stamped with — the
+        //      subject the client actually inquired about. This is the
+        //      only source that distinguishes one of a provider's
+        //      listings from another, so a business inquiry can never
+        //      resolve to an individual listing (or vice versa).
+        //   2. the pair's most recent INDIVIDUAL contract.
+        //   3. the provider's latest live INDIVIDUAL listing.
+        // Steps 2 and 3 are filtered to profile_type = 'individual'
+        // on purpose: a HIRE is pinned to ONE listing, and a business
+        // listing (a resort, a rental) is never hired as a worker.
+        // Without the filter a pair's latest BUSINESS contract — which
+        // a business inquiry now writes, so the inquiry is trackable —
+        // could be picked up and hired through, pinning a pending_hire
+        // to a listing that must never carry one.
         $stmt = $pdo->prepare(
-            'SELECT provider_listing_id FROM service_contracts
-             WHERE provider_id = :p AND client_id = :c
-               AND provider_listing_id IS NOT NULL
-             ORDER BY id DESC LIMIT 1'
+            'SELECT listing_id FROM conversations
+             WHERE (provider_id = :p AND client_id = :c)
+                OR (provider_id = :c AND client_id = :p)
+             ORDER BY (status = \'accepted\') DESC, id DESC LIMIT 1'
         );
         $stmt->execute([':p' => $providerId, ':c' => $myId]);
         $listingId = (int) $stmt->fetchColumn();
+
+        if ($listingId > 0) {
+            // The stamped listing must still be hireable: it has to be
+            // an INDIVIDUAL listing members can see (its own status and
+            // its owner's — include/listing_visibility.php). If it is
+            // not (a business inquiry, or the listing was since blocked
+            // or deleted), this is not a hireable thread at all.
+            $stmt = $pdo->prepare(
+                "SELECT p.id FROM providers p
+                 " . isla_listing_live_join() . "
+                 WHERE p.id = :id AND p.profile_type = 'individual'
+                   AND " . isla_listing_live_where() . " LIMIT 1"
+            );
+            $stmt->execute([':id' => $listingId]);
+            $listingId = (int) $stmt->fetchColumn();
+        } else {
+            $stmt = $pdo->prepare(
+                "SELECT sc.provider_listing_id
+                   FROM service_contracts sc
+                   JOIN providers p ON p.id = sc.provider_listing_id
+                  WHERE sc.provider_id = :p AND sc.client_id = :c
+                    AND sc.provider_listing_id IS NOT NULL
+                    AND p.profile_type = 'individual'
+                  ORDER BY sc.id DESC LIMIT 1"
+            );
+            $stmt->execute([':p' => $providerId, ':c' => $myId]);
+            $listingId = (int) $stmt->fetchColumn();
+        }
+
         if ($listingId === 0) {
             // A job is pinned to the exact listing hired, so that
             // listing has to be one members can still see: its own

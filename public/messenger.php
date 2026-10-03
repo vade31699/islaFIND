@@ -170,6 +170,15 @@ $clientContract  = null;  // contract where I am the CLIENT (I hired them)
 // the subtitle never renders an empty line.
 $threadSubject = '';
 
+// The listing id behind that subject. It decides whether the HIRE!
+// button belongs on this thread: a hire is pinned to ONE listing, so
+// a provider who owns both an individual skill and a business (a
+// mechanic who also runs a sari-sari store) must not be hired through
+// the business inquiry. 0 means "no subject" — a direct chat, or a
+// thread that predates the listing stamp — and only then does the
+// gate fall back to "owns any individual listing".
+$threadListingId = 0;
+
 if ($chatWith > 0 && $chatWith !== $myId) {
     $stmt = $pdo->prepare('SELECT id, full_name, profile_picture FROM users WHERE id = :id LIMIT 1');
     $stmt->execute([':id' => $chatWith]);
@@ -212,8 +221,9 @@ if ($chatWith > 0 && $chatWith !== $myId) {
         // asked to decide on, and an accepted one is what the chat
         // is about. Only one of the two is ever rendered, because
         // only one is the subject of the thread being read.
-        $label = trim((string) ($cr['listing_label'] ?? ''));
-        if ($label === '' && (int) ($cr['listing_id'] ?? 0) > 0) {
+        $label        = trim((string) ($cr['listing_label'] ?? ''));
+        $rowListingId = (int) ($cr['listing_id'] ?? 0);
+        if ($label === '' && $rowListingId > 0) {
             // A row written before listing_label existed (or by hand):
             // resolve the label from the listing itself. The listing
             // may be gone, in which case the header simply shows the
@@ -221,7 +231,7 @@ if ($chatWith > 0 && $chatWith !== $myId) {
             $stmt2 = $pdo->prepare(
                 'SELECT selected_title, name, municipality FROM providers WHERE id = :id LIMIT 1'
             );
-            $stmt2->execute([':id' => (int) $cr['listing_id']]);
+            $stmt2->execute([':id' => $rowListingId]);
             if ($lrow = $stmt2->fetch()) {
                 $label = isla_listing_label(
                     $lrow['selected_title'] ?? null,
@@ -238,7 +248,8 @@ if ($chatWith > 0 && $chatWith !== $myId) {
             $isIncoming = $cr['status'] === 'pending'
                 && (int) $cr['provider_id'] === $myId;
             if ($threadSubject === '' || $isIncoming) {
-                $threadSubject = $label;
+                $threadSubject   = $label;
+                $threadListingId = $rowListingId;
             }
         }
     }
@@ -252,19 +263,32 @@ if ($chatWith > 0 && $chatWith !== $myId) {
         || ($myRequestStatus === null && $theirRequestStatus === null);
 
     if ($otherUser) {
-        // Is the other user an INDIVIDUAL SKILLS provider? Only then
-        // can a client send them a formal HIRE request. The hire flow
+        // Is the other user HIREABLE for THIS thread? The hire flow
         // (HIRE! -> ACCEPT/DECLINE -> JOB DONE -> rating) exists ONLY
         // for hiring a person's skill — BUSINESS listings (resorts,
         // motor rentals) are inquired about and chatted with, but are
-        // never "hired" as a worker. So this count filters by
-        // profile_type = 'individual'.
-        $stmt = $pdo->prepare(
-            "SELECT COUNT(*) FROM providers
-             WHERE user_id = :uid AND profile_type = 'individual'"
-        );
-        $stmt->execute([':uid' => $chatWith]);
-        $otherIsProvider = (int) $stmt->fetchColumn() > 0;
+        // never "hired" as a worker.
+        //
+        // This is a per-LISTING question, not a per-person one: a
+        // provider can own several listings (a mechanic who also runs
+        // a sari-sari store), and only an INDIVIDUAL SKILLS one may be
+        // hired. When the thread names its subject listing, the gate is
+        // that listing's own type, so a business inquiry can never show
+        // HIRE! just because the owner happens to have a skill too.
+        // A thread with no subject (a direct chat, or one predating the
+        // listing stamp) falls back to the old per-person rule.
+        if ($threadListingId > 0) {
+            $stmt = $pdo->prepare('SELECT profile_type FROM providers WHERE id = :id LIMIT 1');
+            $stmt->execute([':id' => $threadListingId]);
+            $otherIsProvider = ((string) $stmt->fetchColumn()) === 'individual';
+        } else {
+            $stmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM providers
+                 WHERE user_id = :uid AND profile_type = 'individual'"
+            );
+            $stmt->execute([':uid' => $chatWith]);
+            $otherIsProvider = (int) $stmt->fetchColumn() > 0;
+        }
 
         // Did I inquire on them? I am the client of a thread with
         // this person when a conversation has them as the provider
@@ -286,10 +310,20 @@ if ($chatWith > 0 && $chatWith !== $myId) {
         // sequential contracts allowed (re-hire support), the LATEST
         // row wins: an older completed/cancelled contract must never
         // shadow a fresh pending hire.
+        //
+        // Only INDIVIDUAL contracts are considered. A business inquiry
+        // is a trackable booking, not a hire, and it is written to the
+        // same table — so a booking made AFTER a pending hire would
+        // otherwise be the "latest" row and shadow the hire the
+        // provider still has to answer. (A legacy row with no listing
+        // predates business contracts, so it counts as individual.)
         $stmt = $pdo->prepare(
-            'SELECT id, status, is_rated FROM service_contracts
-             WHERE provider_id = :me AND client_id = :other
-             ORDER BY id DESC LIMIT 1'
+            "SELECT sc.id, sc.status, sc.is_rated
+               FROM service_contracts sc
+               LEFT JOIN providers p ON p.id = sc.provider_listing_id
+              WHERE sc.provider_id = :me AND sc.client_id = :other
+                AND (p.profile_type IS NULL OR p.profile_type <> 'business')
+              ORDER BY sc.id DESC LIMIT 1"
         );
         $stmt->execute([':me' => $myId, ':other' => $chatWith]);
         $workerContract = $stmt->fetch();
@@ -308,11 +342,16 @@ if ($chatWith > 0 && $chatWith !== $myId) {
         // drives the HIRE! button state (pending / hired / hire
         // again). The LATEST contract decides: after a completed
         // job, the HIRE! button re-enables and the next hire opens
-        // a new sequential contract for this same pair.
+        // a new sequential contract for this same pair. Filtered to
+        // INDIVIDUAL contracts for the same reason as the worker side
+        // above: a business booking must not be read as a hire state.
         $stmt = $pdo->prepare(
-            'SELECT id, status, is_rated FROM service_contracts
-             WHERE provider_id = :other AND client_id = :me
-             ORDER BY id DESC LIMIT 1'
+            "SELECT sc.id, sc.status, sc.is_rated
+               FROM service_contracts sc
+               LEFT JOIN providers p ON p.id = sc.provider_listing_id
+              WHERE sc.provider_id = :other AND sc.client_id = :me
+                AND (p.profile_type IS NULL OR p.profile_type <> 'business')
+              ORDER BY sc.id DESC LIMIT 1"
         );
         $stmt->execute([':other' => $chatWith, ':me' => $myId]);
         $clientContract = $stmt->fetch();

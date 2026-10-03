@@ -160,7 +160,11 @@ hand-written JavaScript files.
 - **Message requests** — a new inquiry is pending until the provider accepts it.
 - **Hire flow**: HIRE! → ACCEPT / DECLINE → job accepted ("On the Job") →
   JOB DONE → the client is prompted to rate. Only *individual* listings can be
-  hired; businesses are inquired about and chatted with.
+  hired; businesses are inquired about and chatted with. The gate is
+  **per-listing, not per-person**: an owner who has both a business *and* a
+  skill (a mechanic who also runs a sari-sari store) is not hireable through
+  the business inquiry — the HIRE! button reads the thread's own subject
+  listing, and a crafted hire request is refused server-side.
 - **Trackable inquiries**: every inquiry writes a `service_contracts` row, so
   it shows up under **My Jobs** instead of living only as a chat bubble. An
   individual inquiry is the hire job above; a business inquiry is a **booking**
@@ -407,6 +411,18 @@ and confirms a refused attempt is not counted again. Every key it uses is a
      their own listing.
    - **Moderation** — blocking stores the reason, resolves the open report and
      records that the listing was blocked.
+   - **Trackable inquiries** — an inquiry writes a `service_contracts` row and
+     stamps the conversation with the listing it is about; the thread header,
+     the inbox row and the poll JSON all carry that subject. The hire gate is
+     proved per-listing: an owner with both a business and an individual listing
+     gets HIRE! on the individual thread and **not** on the business one, a
+     crafted hire against the business listing is refused, an individual hire is
+     still pinned to the individual listing, and a business booking can be
+     completed but never moved to `accepted`.
+   - **Admin queue search** — the one search box finds a report by the listing's
+     IslaProfile ID, the reported owner's email or member id, and the reporting
+     member's email or member id; a term that matches nothing returns an empty
+     queue, and the term is carried into the tab links and echoed on screen.
    - **A blocked listing is gone** — the feed/catalogue query stops returning it,
      no card is rendered for it, and it cannot be reported, saved, messaged
      about or view-tracked; meanwhile its owner still sees it, is told it is

@@ -80,10 +80,11 @@ $adminId = 0;
 $ownerId = 0;
 $reporterId = 0;
 $listingId = 0;
+$individualListingId = 0;
 
 function cleanup(): void
 {
-    global $pdo, $runId, $adminId, $ownerId, $reporterId, $listingId;
+    global $pdo, $runId, $adminId, $ownerId, $reporterId, $listingId, $individualListingId;
 
     // Each delete is attempted independently. Wrapping them all in one
     // try meant that a single failure - a table that does not exist in
@@ -100,13 +101,21 @@ function cleanup(): void
 
     $problems = [];
 
-    foreach ($steps as $label => $sql) {
-        try {
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([':v' => $listingId]);
-        } catch (Throwable $e) {
-            // A table this schema does not have is not a reason to stop.
-            $problems[] = $label . ' (' . $e->getMessage() . ')';
+    // Both listings are swept by the same steps: the business one the
+    // report is filed against, and the individual one the hire-flow
+    // checks inquire on.
+    foreach ([$listingId, $individualListingId] as $oneListing) {
+        if ($oneListing <= 0) {
+            continue;
+        }
+        foreach ($steps as $label => $sql) {
+            try {
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([':v' => $oneListing]);
+            } catch (Throwable $e) {
+                // A table this schema does not have is not a reason to stop.
+                $problems[] = $label . ' (' . $e->getMessage() . ')';
+            }
         }
     }
 
@@ -216,7 +225,27 @@ $listingId = (int) $pdo->lastInsertId();
 $stmt = $pdo->prepare('UPDATE providers SET profile_code = :c WHERE id = :id');
 $stmt->execute([':c' => 'ISLA-TEST-' . $listingId, ':id' => $listingId]);
 
-check('the test fixtures were created', $adminId > 0 && $ownerId > 0 && $reporterId > 0 && $listingId > 0);
+// A SECOND listing under the SAME owner, an INDIVIDUAL SKILLS one.
+// It is the crux of the hire-gate checks: a provider who owns both a
+// business and a skill must not be hireable through the BUSINESS
+// inquiry, so the gate has to be per-listing, not per-person.
+$stmt = $pdo->prepare(
+    "INSERT INTO providers (profile_type, user_id, profile_description, selected_title, municipality, status)
+     VALUES ('individual', :uid, :desc, :title, :muni, 'active')"
+);
+$stmt->execute([
+    ':uid'   => $ownerId,
+    ':desc'  => 'An individual listing created by admin_flow_test.php.',
+    ':title' => 'electrician',
+    ':muni'  => 'Santa Fe',
+]);
+$individualListingId = (int) $pdo->lastInsertId();
+$stmt = $pdo->prepare('UPDATE providers SET profile_code = :c WHERE id = :id');
+$stmt->execute([':c' => 'ISLA-TEST-' . $individualListingId, ':id' => $individualListingId]);
+
+check('the test fixtures were created',
+    $adminId > 0 && $ownerId > 0 && $reporterId > 0
+        && $listingId > 0 && $individualListingId > 0);
 
 // ============================================================
 // The web server
@@ -781,6 +810,249 @@ req('/admin/action.php', $adminJar, [
     'provider_id' => $listingId,
 ]);
 check('unblocking puts the listing back in the feed', feed_sees($listingId) === true);
+
+// ============================================================
+// 5b. TRACKABLE INQUIRIES + THE PER-LISTING HIRE GATE
+// ============================================================
+// The inquiry writes a service_contracts row (so it is trackable)
+// and stamps the conversation with WHICH listing it is about. The
+// hire gate then has to read that listing: a provider who owns BOTH
+// a business and an individual listing must not be hireable through
+// the business inquiry. Before the gate was per-listing, the owner's
+// individual listing made $otherIsProvider true for EVERY thread
+// with them, so the business inquiry wrongly offered HIRE!.
+section('Trackable inquiries and the per-listing hire gate');
+
+$memberCsrf = csrf_of(req('/dashboard.php?tab=home', $memberJar)['body']);
+$ownerCsrf  = csrf_of(req('/dashboard.php?tab=isla', $ownerJar)['body']);
+check('both sides have a CSRF token for the inquiry flow',
+    $memberCsrf !== '' && $ownerCsrf !== '');
+
+// --- Inquire on the INDIVIDUAL listing -----------------------
+req('/send_message.php', $memberJar, [
+    'csrf_token'  => $memberCsrf,
+    'provider_id'  => $individualListingId,
+    'message_text' => 'Are you free to do some electrical work this week?',
+    'return_to'    => 'home',
+]);
+
+$stmt = $pdo->prepare(
+    'SELECT id, status, listing_id, listing_label FROM conversations
+      WHERE provider_id = :p AND client_id = :c LIMIT 1'
+);
+$stmt->execute([':p' => $ownerId, ':c' => $reporterId]);
+$conv = $stmt->fetch();
+check('the inquiry created the conversation', $conv !== false);
+check('the conversation is stamped with the listing inquired about',
+    $conv !== false && (int) $conv['listing_id'] === $individualListingId,
+    $conv === false ? 'no conversation' : 'listing_id=' . $conv['listing_id']);
+check('the stamped label names the skill and the place',
+    $conv !== false && stripos((string) $conv['listing_label'], 'Electrician') !== false
+        && stripos((string) $conv['listing_label'], 'Santa Fe') !== false,
+    $conv === false ? '' : 'label=' . $conv['listing_label']);
+
+$stmt = $pdo->prepare(
+    'SELECT id, status FROM service_contracts
+      WHERE provider_listing_id = :lid AND client_id = :c ORDER BY id DESC LIMIT 1'
+);
+$stmt->execute([':lid' => $individualListingId, ':c' => $reporterId]);
+$indivContract = $stmt->fetch();
+check('the inquiry is TRACKABLE (a contract row was written)',
+    $indivContract !== false, 'no service_contracts row for the inquiry');
+
+// The thread header/subject must show what the thread is about.
+$thread = req('/messenger.php?chat=' . $ownerId, $memberJar);
+check('the thread names the listing it is about',
+    strpos($thread['body'], 'Electrician') !== false,
+    'the conversation subject is missing from the thread');
+
+// The inbox poll carries the same subject for the live list.
+$poll = req('/messenger_poll.php?list=1', $memberJar);
+check('the inbox poll carries the thread subject',
+    strpos($poll['body'], 'Electrician') !== false, 'subject missing from poll JSON');
+
+// --- The owner accepts the message request -------------------
+req('/hire_action.php', $ownerJar, [
+    'csrf_token' => $ownerCsrf,
+    'action'     => 'accept_request',
+    'client_id'  => $reporterId,
+]);
+$stmt = $pdo->prepare('SELECT status FROM conversations WHERE id = :id');
+$stmt->execute([':id' => (int) $conv['id']]);
+check('the provider opened the chat',
+    (string) $stmt->fetchColumn() === 'accepted');
+
+// The INDIVIDUAL thread offers HIRE!.
+$thread = req('/messenger.php?chat=' . $ownerId, $memberJar);
+check('an individual listing thread offers HIRE!',
+    strpos($thread['body'], 'chat-hire-btn') !== false);
+
+// --- Now inquire on the BUSINESS listing ---------------------
+// Same pair, same conversation row: the stamp flips to the business
+// listing. This is exactly the case that used to leak a HIRE! button.
+req('/send_message.php', $memberJar, [
+    'csrf_token'  => $memberCsrf,
+    'provider_id'  => $listingId,
+    'message_text' => 'Do you have a room free this weekend?',
+    'return_to'    => 'home',
+]);
+$stmt = $pdo->prepare('SELECT listing_id, listing_label FROM conversations WHERE id = :id');
+$stmt->execute([':id' => (int) $conv['id']]);
+$restamped = $stmt->fetch();
+check('a new inquiry re-stamps the thread to the new listing',
+    (int) $restamped['listing_id'] === $listingId,
+    'listing_id=' . $restamped['listing_id']);
+check('the re-stamped label names the business',
+    stripos((string) $restamped['listing_label'], 'Report Test Shop') !== false,
+    'label=' . $restamped['listing_label']);
+
+// The BUSINESS thread must NOT offer HIRE!, even though the owner
+// also has an individual listing.
+$thread = req('/messenger.php?chat=' . $ownerId, $memberJar);
+check('a business listing thread does NOT offer HIRE!',
+    strpos($thread['body'], 'chat-hire-btn') === false,
+    'the per-person gate leaked a HIRE! button onto a business inquiry');
+check('the business thread still names the business',
+    strpos($thread['body'], 'Report Test Shop') !== false);
+
+// A crafted hire request is refused server-side, too: the thread's
+// listing is a business one, so no pending_hire may be pinned to it.
+$before = (int) $pdo->query(
+    'SELECT COUNT(*) FROM service_contracts
+      WHERE provider_listing_id = ' . $listingId . " AND status = 'pending_hire'"
+)->fetchColumn();
+req('/hire_action.php', $memberJar, [
+    'csrf_token'   => $memberCsrf,
+    'action'       => 'hire',
+    'recipient_id' => $ownerId,
+]);
+$after = (int) $pdo->query(
+    'SELECT COUNT(*) FROM service_contracts
+      WHERE provider_listing_id = ' . $listingId . " AND status = 'pending_hire'"
+)->fetchColumn();
+check('a crafted hire against a business listing is refused',
+    $before === $after, "before=$before after=$after");
+
+// --- A legitimate individual hire still works ----------------
+req('/send_message.php', $memberJar, [
+    'csrf_token'  => $memberCsrf,
+    'provider_id'  => $individualListingId,
+    'message_text' => 'Back to the electrical work — can I book you?',
+    'return_to'    => 'home',
+]);
+$stmt = $pdo->prepare(
+    'SELECT COUNT(*) FROM service_contracts
+      WHERE provider_listing_id = ' . $individualListingId . " AND status = 'pending_hire'"
+);
+$stmt->execute();
+$indivHiresBefore = (int) $stmt->fetchColumn();
+req('/hire_action.php', $memberJar, [
+    'csrf_token'   => $memberCsrf,
+    'action'       => 'hire',
+    'recipient_id' => $ownerId,
+]);
+$stmt = $pdo->prepare(
+    'SELECT COUNT(*) FROM service_contracts
+      WHERE provider_listing_id = ' . $individualListingId . " AND status = 'pending_hire'"
+);
+$stmt->execute();
+$indivHiresAfter = (int) $stmt->fetchColumn();
+check('an individual hire is still pinned to the individual listing',
+    $indivHiresAfter === $indivHiresBefore + 1,
+    "before=$indivHiresBefore after=$indivHiresAfter");
+
+// --- A business BOOKING cannot be "accepted" ------------------
+// dashboard.php only ever lets a booking be completed; a crafted
+// POST that tries to move it through accept must change nothing.
+$stmt = $pdo->prepare(
+    'SELECT id, status FROM service_contracts
+      WHERE provider_listing_id = :lid AND client_id = :c ORDER BY id DESC LIMIT 1'
+);
+$stmt->execute([':lid' => $listingId, ':c' => $reporterId]);
+$businessContract = $stmt->fetch();
+check('the business inquiry wrote its own booking row', $businessContract !== false);
+
+req('/dashboard.php', $ownerJar, [
+    'csrf_token'      => $ownerCsrf,
+    'update_contract' => '1',
+    'contract_id'     => (int) $businessContract['id'],
+    'contract_status' => 'accepted',
+]);
+$stmt = $pdo->prepare('SELECT status FROM service_contracts WHERE id = :id');
+$stmt->execute([':id' => (int) $businessContract['id']]);
+check('a business booking cannot be moved to accepted',
+    (string) $stmt->fetchColumn() !== 'accepted',
+    'status=' . $stmt->fetchColumn());
+
+// ...but completing it is allowed.
+req('/dashboard.php', $ownerJar, [
+    'csrf_token'      => $ownerCsrf,
+    'update_contract' => '1',
+    'contract_id'     => (int) $businessContract['id'],
+    'contract_status' => 'completed',
+]);
+$stmt = $pdo->prepare('SELECT status FROM service_contracts WHERE id = :id');
+$stmt->execute([':id' => (int) $businessContract['id']]);
+check('a business booking can be marked completed',
+    (string) $stmt->fetchColumn() === 'completed');
+
+// ============================================================
+// 5c. ADMIN QUEUE SEARCH
+// ============================================================
+// The operator is handed one of: a listing's IslaProfile ID, the
+// reported owner's email or member id, or the reporting member's
+// email or member id. One box has to find the report from any of
+// them — and a miss must miss.
+section('Admin queue search');
+
+$adminCsrf = csrf_of(req('/admin/index.php?view=reports&status=all', $adminJar)['body']);
+$queueUrl  = '/admin/index.php?view=reports&status=all&q=';
+
+$searchPage = req($queueUrl, $adminJar);
+check('the queue renders a search box',
+    $searchPage['status'] === 200 && strpos($searchPage['body'], 'name="q"') !== false,
+    'status ' . $searchPage['status']);
+
+$stmt = $pdo->prepare('SELECT user_id FROM users WHERE id = :id');
+$stmt->execute([':id' => $reporterId]);
+$reporterPublicId = (string) $stmt->fetchColumn();
+$stmt->execute([':id' => $ownerId]);
+$ownerPublicId = (string) $stmt->fetchColumn();
+
+/** search_hits(): does the queue, searched for $term, show the report? */
+function search_hits(string $url, string $term, string $jar, string $needle): bool
+{
+    $r = req($url . rawurlencode($term), $jar);
+    return $r['status'] === 200 && strpos($r['body'], $needle) !== false;
+}
+
+check('search by the listing profile ID finds the report',
+    search_hits($queueUrl, 'ISLA-TEST-' . $listingId, $adminJar, 'Report Test Shop'));
+check('search by the reported owner\'s email finds the report',
+    search_hits($queueUrl, $ownerEmail, $adminJar, 'Report Test Shop'));
+check('search by the reporting member\'s email finds the report',
+    search_hits($queueUrl, $reporterEmail, $adminJar, 'Report Test Shop'));
+check('search by the reporting member\'s public id finds the report',
+    search_hits($queueUrl, $reporterPublicId, $adminJar, 'Report Test Shop'));
+check('search by the owner\'s public id finds the report',
+    search_hits($queueUrl, $ownerPublicId, $adminJar, 'Report Test Shop'));
+
+// A term that matches nothing must return an empty queue, not the
+// whole one: a search that silently falls through is worse than none.
+$miss = req($queueUrl . rawurlencode('zzz-no-such-term-zzz'), $adminJar);
+check('a search with no match shows no reports',
+    $miss['status'] === 200 && strpos($miss['body'], 'Report Test Shop') === false,
+    'the queue ignored the search term');
+
+// The term has to survive a tab click, or an operator who searched a
+// person and then opened "Resolved" sees the whole resolved queue.
+$hit = req($queueUrl . rawurlencode($ownerEmail), $adminJar);
+check('the search term is carried into the tab links',
+    strpos($hit['body'], 'q=' . rawurlencode($ownerEmail)) !== false
+        || strpos($hit['body'], 'q=' . htmlspecialchars(rawurlencode($ownerEmail), ENT_QUOTES)) !== false,
+    'the tab links dropped the search term');
+check('the queue says what the current search is',
+    stripos($hit['body'], 'Showing matches for') !== false);
 
 // ============================================================
 // 6. MFA

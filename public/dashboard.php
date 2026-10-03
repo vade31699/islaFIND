@@ -170,11 +170,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
         if (!in_array($newStatus, ['accepted', 'declined', 'completed'], true)) {
             $errors['isla'] = 'Invalid job status.';
         } else {
-            // The contract must belong to THIS user as the provider.
-            // The listing's type is read alongside the update so the
-            // confirmation can tell a completed individual skills job
-            // (which unlocks the client's rating prompt) from a
-            // completed business booking (which is never rated).
+            // Read the listing's type BEFORE writing, and only for a
+            // contract this user owns as the provider (the same
+            // ownership rule the UPDATE below enforces). A business
+            // listing is a BOOKING: it never runs through
+            // accept/decline, so only completion is a valid transition
+            // for it — a crafted POST cannot turn a booking into a
+            // hired job. The type is reused below to word the
+            // confirmation, so a completed individual skills job
+            // (which unlocks the client's rating prompt) reads
+            // differently from a completed business booking.
+            $stmt = $pdo->prepare(
+                'SELECT p.profile_type
+                   FROM service_contracts sc
+                   LEFT JOIN providers p ON p.id = sc.provider_listing_id
+                  WHERE sc.id = :id AND sc.provider_id = :uid LIMIT 1'
+            );
+            $stmt->execute([':id' => $contractId, ':uid' => $user['id']]);
+            $contractType = $stmt->fetchColumn();
+
+            if ($contractType === false) {
+                $errors['isla'] = 'Job not found.';
+            } elseif ($contractType === 'business' && $newStatus !== 'completed') {
+                $errors['isla'] = 'A business booking can only be marked completed.';
+            } else {
             $stmt = $pdo->prepare(
                 'UPDATE service_contracts
                  SET status = :status
@@ -186,16 +205,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
                 ':uid'    => $user['id'],
             ]);
             if ($stmt->rowCount() > 0) {
-                $stmt = $pdo->prepare(
-                    'SELECT p.profile_type
-                       FROM service_contracts sc
-                       LEFT JOIN providers p ON p.id = sc.provider_listing_id
-                      WHERE sc.id = :id LIMIT 1'
-                );
-                $stmt->execute([':id' => $contractId]);
-                $isBusinessBooking = (string) $stmt->fetchColumn() === 'business';
-
-                if ($newStatus === 'completed' && !$isBusinessBooking) {
+                if ($newStatus === 'completed' && $contractType !== 'business') {
                     // A completed individual skills job unlocks the
                     // client's rating prompt.
                     $messages['isla'] = 'Job marked completed — the client can now rate your service.';
@@ -207,6 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
             } else {
                 $errors['isla'] = 'Job not found.';
             }
+            }   // end: contract belongs to this provider (and is editable)
         }
     }
 

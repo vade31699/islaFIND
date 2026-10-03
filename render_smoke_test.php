@@ -1139,10 +1139,31 @@ if (!$ready) {
         login_throttle_record_failure($pdo, $probeId, $probeIp);
     }
     $maxWait = login_throttle_wait($pdo, $probeId, $probeIp);
+
+    // The CAP itself is a property of the backoff curve, not of the
+    // clock, so assert it on the pure function: however long the
+    // streak grows, the wait stops at LOGIN_BACKOFF_MAX.
     check(
-        'the wait is capped (an increasing backoff, never a hard lock)',
-        $maxWait <= LOGIN_BACKOFF_MAX && $maxWait >= LOGIN_BACKOFF_MAX - 2,
-        'wait ' . $maxWait . 's / cap ' . LOGIN_BACKOFF_MAX . 's'
+        'the backoff curve is capped (never a hard lock)',
+        login_backoff_seconds(LOGIN_FREE_ATTEMPTS + 200) === LOGIN_BACKOFF_MAX,
+        'backoff for a huge streak = ' . login_backoff_seconds(LOGIN_FREE_ATTEMPTS + 200) . 's'
+    );
+
+    // The LIVE wait is measured from the DATABASE's clock
+    // (UNIX_TIMESTAMP(last_failed_at) against PHP's time()), so it
+    // runs a few seconds behind on a server whose clock is not
+    // perfectly in step with the web process — TiDB Cloud sat ~4s
+    // behind in practice. What matters is that the wait has REACHED
+    // the cap and can never pass it, not that it equals it to the
+    // second, so this tolerates that skew. A cap that was missing or
+    // set to the wrong value still fails: an uncapped wait is orders
+    // of magnitude over the ceiling, and a wrong cap lands well below
+    // the floor.
+    $skew = 60;
+    check(
+        'the live wait has reached the cap and never passes it',
+        $maxWait <= LOGIN_BACKOFF_MAX && $maxWait >= LOGIN_BACKOFF_MAX - $skew,
+        'wait ' . $maxWait . 's / cap ' . LOGIN_BACKOFF_MAX . 's (tolerating ' . $skew . 's of clock skew)'
     );
 
     // The account key and the IP key are independent, which is the

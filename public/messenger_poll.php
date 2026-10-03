@@ -145,19 +145,31 @@ if (isset($_GET['chat'])) {
     // The LATEST contract wins in both directions (sequential
     // re-hire support): an old completed/cancelled row must never
     // shadow a fresh pending hire for the same pair.
+    //
+    // Only INDIVIDUAL contracts count, exactly as messenger.php does
+    // — a business inquiry is a booking written to the same table, and
+    // it must not be read as a hire state here either. The two files
+    // must agree, because the poller compares this signature against
+    // the one messenger.php renders to decide whether to reload.
     $stmt = $pdo->prepare(
-        'SELECT id, status FROM service_contracts
-         WHERE provider_id = :me AND client_id = :other
-         ORDER BY id DESC LIMIT 1'
+        "SELECT sc.id, sc.status
+           FROM service_contracts sc
+           LEFT JOIN providers p ON p.id = sc.provider_listing_id
+          WHERE sc.provider_id = :me AND sc.client_id = :other
+            AND (p.profile_type IS NULL OR p.profile_type <> 'business')
+          ORDER BY sc.id DESC LIMIT 1"
     );
     $stmt->execute([':me' => $myId, ':other' => $otherId]);
     if ($row = $stmt->fetch()) {
         $workerStatus = $row['status'];
     }
     $stmt = $pdo->prepare(
-        'SELECT id, status FROM service_contracts
-         WHERE provider_id = :other AND client_id = :me
-         ORDER BY id DESC LIMIT 1'
+        "SELECT sc.id, sc.status
+           FROM service_contracts sc
+           LEFT JOIN providers p ON p.id = sc.provider_listing_id
+          WHERE sc.provider_id = :other AND sc.client_id = :me
+            AND (p.profile_type IS NULL OR p.profile_type <> 'business')
+          ORDER BY sc.id DESC LIMIT 1"
     );
     $stmt->execute([':me' => $myId, ':other' => $otherId]);
     if ($row = $stmt->fetch()) {
