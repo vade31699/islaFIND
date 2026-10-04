@@ -62,8 +62,40 @@ if (!$user) {
 
 // --- 5. Derived values for display ------------------------------
 // Age = whole years between the birth date and today.
-$birthDate = new DateTime($user['date_of_birth']);
-$age = $birthDate->diff(new DateTime('today'))->y;
+//
+// Guarded rather than computed blindly: date_of_birth is NOT NULL in
+// the schema, but a row written before the column was enforced (or by
+// an import) can still be empty or unparseable, and `new DateTime('')`
+// answers with the CURRENT time — which printed "0 years old" and made
+// a real account look newborn. An unusable value therefore renders as
+// an em dash, and only a genuine Y-m-d date ever produces a number.
+$age = null;
+$rawBirthDate = trim((string) ($user['date_of_birth'] ?? ''));
+
+if ($rawBirthDate !== '') {
+    // The leading '!' is load-bearing. Without it createFromFormat()
+    // fills the UNSPECIFIED parts from the current clock, so
+    // "2000-01-01" became "2000-01-01 14:37:22" — which made a birthday
+    // that fell EARLIER TODAY look like a future date (age showed as
+    // unknown) and an exact N-year birthday read as N-1, because the
+    // leftover hours sat between the two dates. '!' resets every
+    // unspecified field to zero, so the value is midnight and the
+    // whole-year count is exact.
+    //
+    // It has to be the FIRST character: a trailing '!' also clears the
+    // date that was just parsed, collapsing every value to the Unix
+    // epoch (every user then read as 56).
+    $birthDate = DateTime::createFromFormat('!Y-m-d', substr($rawBirthDate, 0, 10));
+    $dobErrors = DateTime::getLastErrors();
+
+    // Reject both a parse failure and a "parsed but not a real date"
+    // warning (2025-02-30 becomes 2025-03-02 unless we check).
+    if ($birthDate !== false
+        && ($dobErrors === false || ($dobErrors['warning_count'] === 0 && $dobErrors['error_count'] === 0))
+        && $birthDate <= new DateTime('today')) {
+        $age = $birthDate->diff(new DateTime('today'))->y;
+    }
+}
 
 // Status messages rendered as colored alert banners.
 $messages = [];
@@ -119,7 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
 
     // ==== 6c. Revoke a device / session -------------------------
     elseif (isset($_POST['revoke_device'])) {
-        $deviceId = (int) ($_POST['device_id'] ?? 0);
+        $deviceId = isla_post_int($_POST['device_id'] ?? 0);
 
         // Only the owner may revoke (user_id must match).
         $stmt = $pdo->prepare('SELECT * FROM user_devices WHERE id = :id AND user_id = :uid LIMIT 1');
@@ -162,7 +194,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
 
     // ==== 6d. Update a service contract's status (provider side) --
     elseif (isset($_POST['update_contract'])) {
-        $contractId = (int) ($_POST['contract_id'] ?? 0);
+        $contractId = isla_post_int($_POST['contract_id'] ?? 0);
         $newStatus  = $_POST['contract_status'] ?? '';
 
         // Only the worker-driven lifecycle statuses may be written
@@ -343,14 +375,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
     // password AND the typed word DELETE. A stray tap can therefore
     // never wipe an account.
     //
-    // Cleanup:
-    //   - every table that points at this user cascades from the
-    //     users row (providers, conversations, messages,
-    //     service_contracts, reviews, user_interactions,
-    //     saved_listings — see final_app.sql)
-    //   - user_devices has NO foreign key, so it is cleared by hand
-    //   - the uploaded avatar file is removed from uploads/ (its name
-    //     is unreadable once the row is gone)
+    // What "delete" removes is defined ONCE, in include/purge.php:
+    //
+    //   - every file the account owned: its avatar, plus each
+    //     listing's own cover and album. Files go FIRST, while the
+    //     rows still name them; after the DELETE nothing in the
+    //     database points at a file again, so anything skipped
+    //     would be an orphan in uploads/ nobody can ever find.
+    //   - every row that points at this account: the listings, the
+    //     album, reviews, saves, interactions, inquiries, reports,
+    //     chats, messages and contracts all carry ON DELETE CASCADE
+    //     from users.id (see final_app.sql).
+    //   - the two tables a cascade CANNOT reach, cleared by hand
+    //     there: user_devices (device names, IP addresses) and the
+    //     login throttle row that still holds this account's EMAIL
+    //     ADDRESS — the one personal detail that used to outlive
+    //     the account it belonged to.
+    //
+    // The row deletion is one transaction: a half-deleted account,
+    // with its listings still live and its profile gone, would be
+    // worse than no deletion at all.
     elseif (isset($_POST['delete_account'])) {
         $deletePassword = $_POST['delete_password'] ?? '';
         $confirmWord    = trim($_POST['confirm_delete'] ?? '');
@@ -362,47 +406,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
             // gesture, not a spelling test.
             $errors['delete'] = 'Type DELETE to confirm, then submit again.';
         } else {
-            // Every file goes FIRST, while the names are still
-            // readable: the account avatar, plus each listing's own
-            // cover and album photos. After the DELETE below those rows
-            // are gone and nothing in the database points at the files
-            // again, so anything skipped here is an orphan in uploads/
-            // that nobody can ever find or clean up. The removals go
-            // through the storage seam, which keeps a stored value from
-            // escaping the uploads directory and knows where the files
-            // actually live — and which is best-effort, so a file that is
-            // already gone never blocks the account from being deleted.
-            if (!empty($user['profile_picture'])) {
-                isla_upload_delete((string) $user['profile_picture']);
-            }
-
-            // A LEFT JOIN so a listing with no album still yields its
-            // cover (one row, album_pic NULL) and one with an album
-            // yields every file; the empty checks below skip the NULLs.
-            $stmt = $pdo->prepare(
-                'SELECT p.profile_picture AS cover_pic, a.image_name AS album_pic
-                   FROM providers p
-                   LEFT JOIN provider_album_images a ON a.provider_id = p.id
-                  WHERE p.user_id = :uid'
-            );
-            $stmt->execute([':uid' => $user['id']]);
-
-            foreach ($stmt->fetchAll() as $ownedFile) {
-                if (!empty($ownedFile['cover_pic'])) {
-                    isla_upload_delete((string) $ownedFile['cover_pic']);
-                }
-                if (!empty($ownedFile['album_pic'])) {
-                    isla_upload_delete((string) $ownedFile['album_pic']);
-                }
-            }
+            require_once __DIR__ . '/../include/purge.php';
 
             try {
-                $pdo->beginTransaction();
-                $stmt = $pdo->prepare('DELETE FROM user_devices WHERE user_id = :uid');
-                $stmt->execute([':uid' => $user['id']]);
-                $stmt = $pdo->prepare('DELETE FROM users WHERE id = :id');
-                $stmt->execute([':id' => $user['id']]);
-                $pdo->commit();
+                isla_account_purge($pdo, (int) $user['id']);
 
                 // The account is gone: end the session and confirm on
                 // the login screen.
@@ -411,9 +418,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
                 header('Location: ' . sid_append('login.php?deleted=1'));
                 exit;
             } catch (PDOException $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
                 error_log('islaFIND account deletion failed: ' . $e->getMessage());
                 $errors['delete'] = 'We could not delete your account just now. Please try again.';
             }
@@ -422,7 +426,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
 
     // ==== 6e. Logout a device (deactivate, keep it listed) --------
     elseif (isset($_POST['logout_device'])) {
-        $deviceId = (int) ($_POST['device_id'] ?? 0);
+        $deviceId = isla_post_int($_POST['device_id'] ?? 0);
 
         // Only the owner may log out this device (user_id must match).
         $stmt = $pdo->prepare('SELECT * FROM user_devices WHERE id = :id AND user_id = :uid LIMIT 1');
@@ -859,8 +863,15 @@ foreach ($allProviders as $p) {
     $aff     = ($affinity[$cat] ?? 0) / $maxAff;              // 0..1 taste match
     $jobs    = min((int) $p['completed_jobs'], 25) / 25;      // capped job signal
     $popular = min((int) $p['interaction_count'], 100) / 100; // engagement
-    $age     = max(0, $now - strtotime($p['created_at']));
-    $recency = exp(-$age / (60 * 60 * 24 * 14));              // 14-day half-life
+// The listing's age in SECONDS — a ranking input only. Deliberately
+    // NOT called $age: the profile panel below prints the signed-in
+    // user's own $age (whole years, computed in step 5), and this loop
+    // runs over every provider BEFORE that markup is reached. Both
+    // used to be $age, so the loop silently overwrote it and the
+    // profile showed "3600000 years old" — the seconds since the last
+    // listing was created.
+    $listingAgeSeconds = max(0, $now - strtotime($p['created_at']));
+    $recency = exp(-$listingAgeSeconds / (60 * 60 * 24 * 14));  // 14-day half-life
 
     // Weighted formula: taste dominates, completed jobs second,
     // engagement third, recency is a gentle freshness nudge.
@@ -1293,7 +1304,7 @@ include __DIR__ . '/../include/head_meta.php';
                         <div class="dash-info">
                             <div class="dash-row"><span>Email</span><strong><?php echo $email; ?></strong></div>
                             <div class="dash-row"><span>Phone</span><strong><?php echo $phone; ?></strong></div>
-                            <div class="dash-row"><span>Age</span><strong><?php echo $age; ?> years old</strong></div>
+                            <div class="dash-row"><span>Age</span><strong><?php echo $age === null ? '—' : (int) $age; ?><?php echo $age === null ? '' : ' years old'; ?></strong></div>
                             <div class="dash-row"><span>Status</span><strong><?php echo $user['is_verified'] ? 'Verified' : 'Unverified'; ?></strong></div>
                         </div>
 

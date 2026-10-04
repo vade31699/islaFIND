@@ -47,7 +47,7 @@ if (!$user) {
 // selects ONE of the user's own profiles to UPDATE. Without it the
 // handler always INSERTs a brand-new profile, so one person can
 // hold several listings (engineer + shop, etc.).
-$editId   = (int) ($_GET['edit'] ?? 0);
+$editId   = isla_post_int($_GET['edit'] ?? 0);
 $provider = false;   // FALSE = create-new mode
 
 if ($editId > 0) {
@@ -122,10 +122,18 @@ if (!isset($municipalities[$oldInput['municipality']])) {
 $isBusiness = ($oldInput['profile_type'] === 'business');
 
 if ($oldInput['latitude'] !== '' || $oldInput['longitude'] !== '') {
-    $latOk = is_numeric($oldInput['latitude']) && $oldInput['latitude'] >= -90 && $oldInput['latitude'] <= 90;
-    $lngOk = is_numeric($oldInput['longitude']) && $oldInput['longitude'] >= -180 && $oldInput['longitude'] <= 180;
+    // isla_is_decimal() rather than is_numeric(): the pin is pasted in
+    // by hand as "lat, lng", and is_numeric() would wave through "1e5",
+    // "+5", "0x1A" and "12,5" — none of which is a coordinate this app
+    // should store or hand to Google Maps. A value that is not a plain
+    // decimal number is not a number the visitor typed, so it is
+    // refused instead of being cast into something plausible.
+    $latOk = isla_is_decimal($oldInput['latitude'])
+        && (float) $oldInput['latitude'] >= -90 && (float) $oldInput['latitude'] <= 90;
+    $lngOk = isla_is_decimal($oldInput['longitude'])
+        && (float) $oldInput['longitude'] >= -180 && (float) $oldInput['longitude'] <= 180;
     if (!$latOk || !$lngOk) {
-        $errors['latitude'] = 'Please pin a valid location.';
+        $errors['latitude'] = 'Please pin a valid location (numbers only, e.g. 14.6095, 120.9842).';
     }
 } elseif ($isBusiness) {
     // No coordinates at all on a business listing.
@@ -153,21 +161,26 @@ if ($oldInput['profile_type'] === 'business') {
 if ($oldInput['profile_type'] === 'individual') {
     if ($oldInput['profile_description'] === '') {
         $errors['profile_description'] = 'Please tell clients about your service.';
-    } elseif (mb_strlen($oldInput['profile_description']) > 1000) {
-        $errors['profile_description'] = 'Description must be 1000 characters or fewer.';
-    } elseif (contains_html_tag($oldInput['profile_description'])) {
-        // No markup in the description. Escaping already makes this
-        // safe to display — refusing it here means a tag like
-        // <script>alert('XSS')</script> is never stored or listed at
-        // all. Plain text such as "units < 2 tons" still passes.
-        $errors['profile_description'] = 'The description cannot contain HTML tags or scripts.';
+    } elseif (($descProblem = isla_text_problem($oldInput['profile_description'], 1000, 'Description')) !== null) {
+        // Shared length + markup rule (see security.php). Escaping
+        // already makes the description safe to display — refusing
+        // markup here means a tag like <script>alert('XSS')</script>
+        // is never stored or listed at all. Plain text such as
+        // "units < 2 tons" still passes, because contains_html_tag()
+        // only matches a "<" followed by a letter, "/" or "!".
+        $errors['profile_description'] = $descProblem;
     }
 } else {
     // BUSINESS: the unit count must be a non-negative whole number.
+    // isla_is_digits() is what enforces "numbers only": letters, a
+    // minus sign and a decimal point are all refused, so "12 rooms" or
+    // "5.5" cannot be stored in an integer column. The wording names
+    // the problem because "must be a number" is more actionable than
+    // a silent cast of "12abc" to 12.
     if ($oldInput['unit_inventory'] === '') {
         $errors['unit_inventory'] = 'Please enter how many units are available.';
-    } elseif (!ctype_digit($oldInput['unit_inventory'])) {
-        $errors['unit_inventory'] = 'Units available must be a whole number.';
+    } elseif (!isla_is_digits($oldInput['unit_inventory'])) {
+        $errors['unit_inventory'] = 'Units available must be a whole number — numbers only, no letters.';
     } elseif ((int) $oldInput['unit_inventory'] > 999999) {
         $errors['unit_inventory'] = 'Units available is too large.';
     }

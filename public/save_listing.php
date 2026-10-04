@@ -140,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
     ]);
 }
 
-$providerId = (int) ($_POST['provider_id'] ?? 0);
+$providerId = isla_post_int($_POST['provider_id'] ?? 0);
 
 // The Home return lands on the exact card that was toggled: only the
 // catalogue cards carry id="listing-N" (see feedCardHtml), so the anchor

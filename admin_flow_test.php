@@ -41,6 +41,7 @@ if (PHP_SAPI !== 'cli') {
 }
 
 require_once __DIR__ . '/include/db.php';
+require_once __DIR__ . '/include/purge.php';   // the tests clean up exactly like the app deletes
 
 // --- Result bookkeeping ---------------------------------------
 $pass   = 0;
@@ -91,19 +92,28 @@ function cleanup(): void
     // this schema, say - aborted the rest and stranded every fixture in
     // the live database, where a later run would then trip over its own
     // leftovers. A leak is recoverable; a silent partial cleanup is not.
+    //
+    // The LAST step of each group is the shared purge
+    // (include/purge.php) rather than a bare DELETE: these fixtures
+    // sign in repeatedly, so they pile up user_devices rows, and their
+    // listings carry pictures. A raw DELETE removed the row and left
+    // both behind — this test was the reason the database had 117
+    // device rows belonging to accounts that no longer existed. Cleaning
+    // up after yourself with the same routine the app itself uses is the
+    // whole point.
     $steps = [
         'reports on the listing' => 'DELETE FROM profile_reports WHERE provider_id = :v',
         'interactions on it'    => 'DELETE FROM user_interactions WHERE provider_id = :v',
         'saves of it'           => 'DELETE FROM saved_listings WHERE provider_id = :v',
         'reviews of it'         => 'DELETE FROM reviews WHERE provider_id = :v',
-        'the listing itself'    => 'DELETE FROM providers WHERE id = :v',
     ];
 
     $problems = [];
 
     // Both listings are swept by the same steps: the business one the
     // report is filed against, and the individual one the hire-flow
-    // checks inquire on.
+    // checks inquire on. The listing's own files go with it, so a run
+    // leaves nothing in uploads/ either.
     foreach ([$listingId, $individualListingId] as $oneListing) {
         if ($oneListing <= 0) {
             continue;
@@ -117,6 +127,11 @@ function cleanup(): void
                 $problems[] = $label . ' (' . $e->getMessage() . ')';
             }
         }
+        try {
+            isla_listing_purge($pdo, (int) $oneListing);
+        } catch (Throwable $e) {
+            $problems[] = 'the listing\'s own files (' . $e->getMessage() . ')';
+        }
     }
 
     foreach ([$reporterId, $ownerId] as $uid) {
@@ -127,7 +142,6 @@ function cleanup(): void
             'their reports'      => 'DELETE FROM profile_reports WHERE reporter_id = :v',
             'their interactions' => 'DELETE FROM user_interactions WHERE user_id = :v',
             'their saves'        => 'DELETE FROM saved_listings WHERE user_id = :v',
-            'their account'      => 'DELETE FROM users WHERE id = :v',
         ] as $label => $sql) {
             try {
                 $stmt = $pdo->prepare($sql);
@@ -135,6 +149,13 @@ function cleanup(): void
             } catch (Throwable $e) {
                 $problems[] = $label . ' (user ' . $uid . ': ' . $e->getMessage() . ')';
             }
+        }
+        // Their account, with the device rows the repeated sign-ins in this
+        // test created and the throttle row holding their email.
+        try {
+            isla_account_purge($pdo, (int) $uid);
+        } catch (Throwable $e) {
+            $problems[] = 'their account (user ' . $uid . ': ' . $e->getMessage() . ')';
         }
     }
 
@@ -154,10 +175,12 @@ function cleanup(): void
         foreach ($problems as $p) {
             echo "     - $p\n";
         }
-        echo "   Remove them by hand:\n";
+        echo "   Remove them by hand (the sweep also clears the device rows and\n";
+        echo "   the throttle rows a bare DELETE would leave behind):\n";
         echo "     DELETE FROM providers WHERE profile_code LIKE 'ISLA-TEST-%';\n";
         echo "     DELETE FROM users     WHERE email LIKE 'isla-test-%';\n";
         echo "     DELETE FROM admins    WHERE email LIKE 'isla-test-%';\n";
+        echo "     DELETE FROM user_devices WHERE user_id NOT IN (SELECT id FROM users);\n";
         return;
     }
 

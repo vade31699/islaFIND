@@ -69,9 +69,9 @@ function friendlyTime(string $datetime): string
 
 // --- 7. Handle sending a message (POST + CSRF) ------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
-    $otherId = (int) ($_POST['recipient_id'] ?? 0);
+    $otherId = isla_post_int($_POST['recipient_id'] ?? 0);
     $message = trim($_POST['message'] ?? '');
-    $convId  = (int) ($_POST['conversation_id'] ?? 0);   // thread from an inquiry
+    $convId  = isla_post_int($_POST['conversation_id'] ?? 0);   // thread from an inquiry
 
     // The recipient must exist and the message must not be empty
     // (cap the length so nobody floods the inbox).
@@ -80,6 +80,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check()) {
     $recipientExists = $stmt->fetch();
 
     if ($recipientExists && $message !== '' && mb_strlen($message) <= 2000) {
+        // Markup is refused before the row is written. The bubble is
+        // rendered with escaping, so a <script> tag could never execute
+        // anyway — this keeps it out of the database in the first place
+        // (and out of the notification preview). Text that merely
+        // contains a "<" is still fine.
+        if (($messageProblem = isla_text_problem($message, 2000, 'Message')) !== null) {
+            $_SESSION['flash_chat'] = ['type' => 'error', 'msg' => $messageProblem];
+            header('Location: ' . sid_append('messenger.php?chat=' . $otherId));
+            exit;
+        }
         // Resolve the conversation(s) for this pair (replies must
         // stay inside the same thread the inquiry opened).
         $stmt = $pdo->prepare(

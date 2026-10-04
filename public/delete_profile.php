@@ -9,8 +9,10 @@
 //      logged-in user — you can only delete your own listings
 //   3. Deletes the provider row (interactions, reviews and the album
 //      are removed automatically by ON DELETE CASCADE) together with
-//      the picture files the listing owned. The shared account avatar
-//      is NOT touched — every other listing still uses it.
+//      the picture files the listing owned — all of it by the ONE
+//      shared purge in include/purge.php, which the account deletion
+//      in dashboard.php runs too. The shared account avatar is NOT
+//      touched: every other listing still uses it.
 //   4. Redirects back to the dashboard with a confirmation
 // ============================================================
 
@@ -56,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 }
 
 // --- 7. Locate the target profile + check ownership -------------
-$profileId = (int) ($_POST['profile_id'] ?? 0);
+$profileId = isla_post_int($_POST['profile_id'] ?? 0);
 $stmt = $pdo->prepare('SELECT * FROM providers WHERE id = :id LIMIT 1');
 $stmt->execute([':id' => $profileId]);
 $profile = $stmt->fetch();
@@ -69,44 +71,36 @@ if ((int) $profile['user_id'] !== (int) $user['id']) {
     islaFlash('error', 'You can only delete your own profiles.');
 }
 
-// --- 8. Delete the pictures this listing OWNS -------------------
-// A listing carries its own cover (providers.profile_picture) and,
-// for a business, an album (provider_album_images). Both die with
-// the row, and the row's name is the only pointer to the FILE, so
-// the files have to go first — read while the names are still
-// knowable, best-effort, and never the shared account avatar, which
-// every other listing of this person is still using.
+// --- 8. Delete the listing and EVERY trace of it ----------------
+// include/purge.php owns the whole rule, because the account
+// path in dashboard.php needs exactly the same thing and the two
+// must not drift: the cover and album files go first (their names
+// stop being readable the moment the row does), then the row —
+// and ON DELETE CASCADE takes the album rows, the interactions,
+// the reviews, the saves, the inquiries and the reports with it.
 //
-// A LEFT JOIN so a listing with no album still yields its cover (one
-// row, album_pic NULL); the empty checks skip the NULLs.
-require_once __DIR__ . '/../include/uploads.php';
+// The shared ACCOUNT avatar is NOT touched: every other listing of
+// this person is still using it. Chats and jobs belong to the
+// account, not to this listing, so they stay.
+require_once __DIR__ . '/../include/purge.php';
 
-$stmt = $pdo->prepare(
-    'SELECT p.profile_picture AS cover_pic, a.image_name AS album_pic
-       FROM providers p
-       LEFT JOIN provider_album_images a ON a.provider_id = p.id
-      WHERE p.id = :id'
-);
-$stmt->execute([':id' => $profile['id']]);
+$deleted = false;
 
-foreach ($stmt->fetchAll() as $ownedFile) {
-    if (!empty($ownedFile['cover_pic'])) {
-        isla_upload_delete((string) $ownedFile['cover_pic']);
-    }
-    if (!empty($ownedFile['album_pic'])) {
-        isla_upload_delete((string) $ownedFile['album_pic']);
-    }
+try {
+    isla_listing_purge($pdo, (int) $profile['id']);
+    $deleted = true;
+} catch (PDOException $e) {
+    // Nothing was removed, so the banner below must NOT claim it was.
+    error_log('islaFIND listing deletion failed: ' . $e->getMessage());
+    islaFlash('error', 'We could not delete that profile just now. Please try again.');
 }
 
-// --- 9. Delete the provider row ---------------------------------
-// user_interactions and reviews reference providers.id with
-// ON DELETE CASCADE, so they vanish with the listing, and so do the
-// album rows (fk_album_provider). Chats and jobs are tied to the USER
-// account, not the listing, so they stay intact.
-$stmt = $pdo->prepare('DELETE FROM providers WHERE id = :id');
-$stmt->execute([':id' => $profile['id']]);
+if (!$deleted) {
+    header('Location: ' . sid_append('dashboard.php?tab=isla'));
+    exit;
+}
 
-// --- 10. Confirm + redirect -------------------------------------
+// --- 9. Confirm + redirect -------------------------------------
 // NOTE: no htmlspecialchars() here — the flash is escaped ONCE at the
 // point where dashboard.php prints it. Escaping in both places would
 // make an apostrophe show up as "&#039;" in the banner.

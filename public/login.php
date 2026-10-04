@@ -304,6 +304,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($code === '') {                       // Must not be empty
                 $errors['verify_code'] = 'Please enter the verification code.';
+            } elseif (!isla_is_digits($code) || strlen($code) !== 6) {
+                // Every code this app issues is exactly 6 digits (see
+                // random_int() at each generator). Refusing anything else
+                // here costs an attacker nothing to discover — the codes
+                // are already 6 digits — and it means obviously-malformed
+                // input never reaches the guess counter, so a stray
+                // letter cannot burn one of somebody's real attempts.
+                $errors['verify_code'] = 'Please enter the 6-digit code from your email (numbers only).';
             } elseif (isset($_SESSION['admin_mfa'])) {
                 // ---- Admin sign-in challenge ---------------------
                 // Judgeed by admin_auth.php, which owns the guess limit
@@ -394,7 +402,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $middleName = trim($_POST['middle_name'] ?? '');
         $lastName   = trim($_POST['last_name'] ?? '');
         $email       = trim($_POST['email'] ?? '');
-        $phone       = preg_replace('/\D/', '', trim($_POST['phone'] ?? '')); // digits only
+        $phone       = trim($_POST['phone'] ?? '');   // digits enforced at validation below
         $dateOfBirth = trim($_POST['date_of_birth'] ?? '');
         $password       = $_POST['password'] ?? ''; // passwords are NOT trimmed
         $confirmPassword = $_POST['confirm_password'] ?? ''; // never stored
@@ -468,19 +476,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // --- Validate Phone Number ------------------------------
         // A Philippine mobile number: exactly 11 digits starting
-        // with 09 (e.g. 09123456789). Letters and symbols are
-        // rejected; the field was already stripped to digits above.
-        if ($phone === '') {                          // Field must not be empty
-            $errors['phone'] = 'Mobile number is required.';
-        } elseif (!preg_match('/^09\d{9}$/', $phone)) {
-            $errors['phone'] = 'Enter a valid 11-digit mobile number starting with 09 (e.g. 09123456789).';
+        // with 09 (e.g. 09123456789).
+        //
+        // Typed punctuation is forgiven ("+63 917 123 4567" and
+        // "(917) 123-4567" are both reasonable ways to write one), but a
+        // LETTER is not: isla_normalize_phone() refuses it outright
+        // instead of dropping it. "0912ABC4567" is a typo, not a phone
+        // number, and quietly deleting the ABC would store a number the
+        // visitor never typed -- one that could silently collide with
+        // somebody else's account.
+        $phoneDigits = isla_normalize_phone($phone);
+
+        // "+63 917 123 4567" is the same number written internationally.
+        // Rewrite it to the local 09... form that the column, the
+        // uniqueness check and the sign-in lookup all expect, so the
+        // person is not turned away for using the format their country
+        // taught them.
+        if ($phoneDigits !== null && strlen($phoneDigits) === 12
+            && strncmp($phoneDigits, '63', 2) === 0) {
+            $phoneDigits = '0' . substr($phoneDigits, 2);
+        }
+
+        if ($phoneDigits === null) {
+            $errors['phone'] = 'Mobile number must be digits only. Letters and symbols are not accepted.';
+        } elseif (!preg_match('/^09\d{9}$/', $phoneDigits)) {
+            $errors['phone'] = 'Enter a valid 11-digit mobile number starting with 09 (e.g. 09123456789). Numbers only — no letters.';
+        } else {
+            $phone = $phoneDigits;   // store the digits, never the raw text
         }
 
         // --- Validate Date of Birth + Age (18+ rule) ------------
         if ($dateOfBirth === '') {                    // Field must not be empty
             $errors['date_of_birth'] = 'Date of birth is required.';
         } else {
-            $birthDate  = DateTime::createFromFormat('Y-m-d', $dateOfBirth);
+            // The leading '!' matters: without it createFromFormat()
+            // fills the unspecified time parts from the current clock, so
+            // "2000-01-01" became "2000-01-01 14:37:22". The leftover
+            // hours then counted against the 18+ test and could reject
+            // somebody whose 18th birthday was THAT SAME DAY. '!' resets
+            // every unspecified field to zero (midnight), so both the
+            // future-date test and the whole-year count are exact.
+            //
+            // It must be the FIRST character in the format: a trailing
+            // '!' also wipes the date that was just parsed, collapsing
+            // every birth date to the Unix epoch.
+            $birthDate  = DateTime::createFromFormat('!Y-m-d', $dateOfBirth);
             $dateErrors = DateTime::getLastErrors();
 
             if ($birthDate === false
@@ -717,6 +757,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors['form'] = 'That reset code has already been used. Please request a new one.';
             } elseif ($code === '') {
                 $errors['reset_code'] = 'Please enter the reset code.';
+            } elseif (!isla_is_digits($code) || strlen($code) !== 6) {
+                // Same 6-digits-only rule as the verification/MFA code
+                // (see the note there): the reset code is generated by
+                // random_int() as 6 digits, so anything else cannot be
+                // it and is refused before the comparison.
+                $errors['reset_code'] = 'Please enter the 6-digit code from your email (numbers only).';
             } elseif (($_SESSION['pending_reset']['expires'] ?? 0) < time()) {
                 $errors['form'] = 'This code has expired. Please request a new one.';
             } elseif (!hash_equals((string) $_SESSION['pending_reset']['code'], $code)) {
@@ -759,6 +805,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // --- Basic "not empty" checks ----------------------------
         if ($identifier === '') {
             $errors['identifier'] = 'Please enter your email or phone number.';
+        } elseif (mb_strlen($identifier) > 190) {
+            // The identifier is the KEY of the throttling counters (see
+            // login_attempt_keys() in security.php), and that column is
+            // VARCHAR(190). An unbounded field would therefore let one
+            // request write an over-long key — a truncation error on
+            // the failure path, or a row that can never match an
+            // account while still occupying the table. Nothing real is
+            // this long: an address is capped at 255 in the users table
+            // and a mobile number is 11 digits.
+            $errors['identifier'] = 'That email or phone number is too long.';
+        } elseif (!isla_is_login_identifier($identifier)) {
+            // Must look like an email address or a phone number, because
+            // those are the only two things the lookup below compares
+            // against. Refusing markup here (rather than merely escaping
+            // it on output) keeps a <script> tag from ever being written
+            // into the login_attempts table.
+            $errors['identifier'] = 'Enter a valid email address or mobile number.';
         }
         if ($password === '') {
             $errors['password'] = 'Please enter your password.';
@@ -1230,7 +1293,8 @@ include __DIR__ . '/../include/head_meta.php';
                             <div class="form-group">
                                 <div class="input-icon">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                                    <input type="tel" id="phone" name="phone" inputmode="numeric" maxlength="11" pattern="[0-9]{11}"
+                                    <input type="tel" id="phone" name="phone" inputmode="numeric" maxlength="20"
+                                           pattern="[0-9+()\-. ]*"
                                            autocomplete="tel-national"
                                            value="<?php echo htmlspecialchars($oldInput['phone']); ?>"
                                            placeholder="09*********" aria-label="Mobile number (11 digits)">
@@ -1390,7 +1454,7 @@ include __DIR__ . '/../include/head_meta.php';
                                 <div class="input-icon">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                                     <input type="text" id="verify_code" name="verify_code" inputmode="numeric"
-                                           maxlength="6" autocomplete="one-time-code"
+                                           maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code"
                                            value="<?php echo htmlspecialchars($oldInput['verify_code']); ?>"
                                            placeholder="6-digit code" aria-label="Verification code">
                                 </div>
@@ -1509,7 +1573,7 @@ include __DIR__ . '/../include/head_meta.php';
                                     <div class="input-icon">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                                         <input type="text" id="reset_code" name="reset_code" inputmode="numeric"
-                                               maxlength="6" autocomplete="one-time-code"
+                                               maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code"
                                                value="<?php echo htmlspecialchars($oldInput['reset_code']); ?>"
                                                placeholder="6-digit code" aria-label="Reset code">
                                     </div>

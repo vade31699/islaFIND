@@ -73,7 +73,7 @@ $myId = (int) $user['id'];
 // ============================================================
 if (isset($_GET['chat'])) {
     $otherId = (int) $_GET['chat'];
-    $afterId = max(0, (int) ($_GET['after'] ?? 0));
+    $afterId = isla_post_int($_GET['after'] ?? 0);
 
     // The other user must exist (and cannot be me).
     $stmt = $pdo->prepare('SELECT id FROM users WHERE id = :id LIMIT 1');

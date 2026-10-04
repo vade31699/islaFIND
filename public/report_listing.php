@@ -102,7 +102,10 @@ $returnTo = (($_POST['return_to'] ?? '') === 'catalogue') ? 'catalogue' : 'home'
 
 // --- 5. Input --------------------------------------------------
 $userId     = (int) $_SESSION['user_id'];
-$providerId = (int) ($_POST['provider_id'] ?? 0);
+// Not (int): the cast would turn "5abc" into 5 and report the wrong
+// listing without ever complaining. Anything not written as a plain
+// number comes back as 0 and is refused by the check below.
+$providerId = isla_post_int($_POST['provider_id'] ?? 0);
 $reasonCode = trim((string) ($_POST['reason_code'] ?? ''));
 $details    = trim((string) ($_POST['details'] ?? ''));
 
@@ -120,6 +123,14 @@ if (!array_key_exists($reasonCode, isla_report_reasons())) {
 // cope with a megabyte of text.
 if (strlen($details) > 2000) {
     $details = substr($details, 0, 2000);
+}
+
+// Markup is refused as well as length-capped. The details are rendered
+// escaped for the admin queue, so a <script> tag could not run there
+// anyway; keeping it out of the table means it is also out of the copy
+// an admin might paste into an email or a note elsewhere.
+if (contains_html_tag($details)) {
+    report_back('error', 'Your report cannot contain HTML tags or scripts.', $returnTo);
 }
 
 // "Something else" with nothing written is not a report.

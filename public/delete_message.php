@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 
 // --- 6. Collect and sanitize the target message id --------------
 // Cast to int so no string can reach the SQL layer.
-$msgId = (int) ($_POST['message_id'] ?? 0);
+$msgId = isla_post_int($_POST['message_id'] ?? 0);
 
 if ($msgId <= 0) {
     $_SESSION['flash_chat'] = ['type' => 'error', 'msg' => 'No message was selected.'];

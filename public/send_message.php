@@ -35,7 +35,7 @@ require_once __DIR__ . '/../include/listing_visibility.php';
 require_once __DIR__ . '/../include/categories.php';   // isla_listing_label() — what the inquiry is about
 
 // --- 5. Collect + validate the fields ---------------------------
-$providerId = (int) ($_POST['provider_id'] ?? 0);
+$providerId = isla_post_int($_POST['provider_id'] ?? 0);
 $message    = trim($_POST['message_text'] ?? '');
 $clientId   = (int) $_SESSION['user_id'];
 
@@ -48,6 +48,12 @@ if ($providerId <= 0) {
     $msg = 'Please enter a message before sending.';
 } elseif (mb_strlen($message) > 2000) {
     $msg = 'Message must be 2000 characters or fewer.';
+} elseif (($msgProblem = isla_text_problem($message, 2000, 'Message')) !== null) {
+    // Markup is refused rather than stored. Escaping on output is what
+    // actually makes a message safe to display, so this is the second
+    // layer: a <script> tag never reaches the database at all. Ordinary
+    // text with a "<" in it ("rate < 500") still passes.
+    $msg = $msgProblem;
 } else {
     // --- 6. Load the provider listing (need its owner) ----------
     // profile_type is read too: the contract row below is only

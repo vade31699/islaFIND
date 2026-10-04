@@ -19,14 +19,22 @@ if (PHP_SAPI !== 'cli') {
 }
 
 require_once __DIR__ . '/include/db.php';
+require_once __DIR__ . '/include/purge.php';
+
 // Test user who OWNS a listing, so their own profile appears in their feed.
-$pdo->exec("DELETE FROM user_interactions WHERE user_id IN (SELECT id FROM users WHERE email = 'own.test@example.com')");
-$pdo->exec("DELETE FROM service_contracts WHERE provider_id IN (SELECT id FROM users WHERE email = 'own.test@example.com') OR client_id IN (SELECT id FROM users WHERE email = 'own.test@example.com')");
-$pdo->exec("DELETE FROM messages WHERE sender_id IN (SELECT id FROM users WHERE email = 'own.test@example.com') OR recipient_id IN (SELECT id FROM users WHERE email = 'own.test@example.com')");
-$pdo->exec("DELETE FROM conversations WHERE provider_id IN (SELECT id FROM users WHERE email = 'own.test@example.com') OR client_id IN (SELECT id FROM users WHERE email = 'own.test@example.com')");
-$pdo->exec("DELETE FROM user_devices WHERE user_id IN (SELECT id FROM users WHERE email = 'own.test@example.com')");
-$pdo->exec("DELETE FROM providers WHERE user_id IN (SELECT id FROM users WHERE email = 'own.test@example.com')");
-$pdo->exec("DELETE FROM users WHERE email = 'own.test@example.com'");
+//
+// The old fixture was reset with seven hand-ordered DELETEs, which had to be
+// kept in step with the schema by hand and still missed two things: the
+// login-throttle row holding the address, and the account's uploaded files.
+// One call to the same purge the app uses when somebody really does delete
+// their account removes all of it, cascade included.
+$stale = $pdo->prepare('SELECT id FROM users WHERE email = :email');
+$stale->execute([':email' => 'own.test@example.com']);
+$staleId = $stale->fetchColumn();
+if ($staleId !== false) {
+    isla_account_purge($pdo, (int) $staleId);
+}
+
 $pdo->prepare("INSERT INTO users (user_id, full_name, email, phone, date_of_birth, password_hash, is_verified) VALUES (?, ?, ?, ?, ?, ?, 1)")
     ->execute([random_int(1, 500000), 'Own Tester', 'own.test@example.com', '09990009004', '1995-06-15', password_hash('Testpass1!', PASSWORD_DEFAULT)]);
 $uid = (int) $pdo->lastInsertId();

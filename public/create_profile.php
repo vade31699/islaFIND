@@ -46,7 +46,7 @@ if (!$user) {
 // profiles to edit. A user can own several islaFIND profiles
 // (e.g. an engineer who also runs a shop), so without an edit id
 // this page is always in CREATE-NEW mode.
-$editId = (int) ($_GET['edit'] ?? 0);
+$editId = isla_post_int($_GET['edit'] ?? 0);
 $provider = false;   // FALSE = create-new mode
 
 if ($editId > 0) {

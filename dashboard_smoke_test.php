@@ -615,18 +615,101 @@ check(
         && strpos($listingPhotos, "A photo album is for business listings.") !== false
 );
 // Listing pictures die with the listing and with the account, or they
-// become orphans in uploads/ that nothing points at any more.
+// become orphans in uploads/ that nothing points at any more. The rule
+// lives ONCE, in include/purge.php — the listing handler and the danger
+// zone must not each grow their own half of it, because one of them
+// always forgets something.
 $deleteProfile = (string) file_get_contents($web . '/delete_profile.php');
+$purgeSrc      = (string) file_get_contents($incDir . '/purge.php');
 check(
-    'deleting a listing deletes the files it owned (never the account avatar)',
-    strpos($deleteProfile, 'provider_album_images') !== false
-        && strpos($deleteProfile, 'isla_upload_delete((string) $ownedFile[\'cover_pic\'])') !== false
-        && strpos($deleteProfile, 'isla_upload_delete((string) $ownedFile[\'album_pic\'])') !== false
-        && strpos($deleteProfile, 'every other listing of this person is still using') !== false
+    'purge.php removes the files a listing owned, and the shared avatar only with the account',
+    strpos($purgeSrc, 'LEFT JOIN provider_album_images a ON a.provider_id = p.id') !== false
+        && strpos($purgeSrc, 'isla_upload_delete((string) $row[\'cover_pic\'])') !== false
+        && strpos($purgeSrc, 'isla_upload_delete((string) $row[\'album_pic\'])') !== false
+        && strpos($purgeSrc, 'NOT the account avatar') !== false
+        && strpos($purgeSrc, 'it leaves with the ACCOUNT, not the listing') !== false
+);
+// Files first, rows second: a row is the only pointer to a file, so the
+// other order loses the names and the bytes become unreachable.
+check(
+    'the files go before the rows, on both paths',
+    strpos($purgeSrc, 'Files first') !== false
+        && strpos($purgeSrc, '// --- 2. Rows, in one transaction') !== false
 );
 check(
-    'deleting the account deletes every listing picture too',
-    strpos($dashboard, 'LEFT JOIN provider_album_images a ON a.provider_id = p.id') !== false
+    'both deletion paths run the one shared purge',
+    strpos($deleteProfile, 'include/purge.php') !== false
+        && strpos($deleteProfile, 'isla_listing_purge(') !== false
+        && strpos($dashboard, 'include/purge.php') !== false
+        && strpos($dashboard, 'isla_account_purge(') !== false
+        // ...and neither of them grew its own inline half.
+        && strpos($deleteProfile, 'DELETE FROM providers') === false
+        && strpos($deleteProfile, 'DELETE FROM users') === false
+        && strpos($dashboard, "DELETE FROM user_devices WHERE user_id = :uid") === false
+        && strpos($dashboard, "DELETE FROM users WHERE id = :id") === false
+);
+// Two tables carry no foreign key, so no cascade can reach them: the
+// device history (device names, IP addresses) and the sign-in throttle,
+// which still held the EMAIL ADDRESS of an account that had asked to be
+// deleted. Those two DELETEs are the whole reason purge.php exists.
+//
+// The device rows are keyed by users.user_id (the public ISLA-xxxxxx
+// number), NOT users.id -- deleting by the primary key leaves the whole
+// device history behind, which is how the database ended up with rows
+// belonging to accounts that no longer existed.
+check(
+    'account deletion clears the two tables a cascade cannot reach',
+    strpos($purgeSrc, 'DELETE FROM user_devices WHERE user_id = :pk OR user_id = :custom') !== false
+        && strpos($purgeSrc, 'SELECT email, profile_picture, user_id FROM users') !== false
+        && strpos($purgeSrc, "DELETE FROM login_attempts WHERE scope = 'account' AND subject = :email") !== false
+);
+// ...and the sweep that mops up rows deleted outside the app must join on
+// the same column: joined on users.id it matches nothing and would throw
+// away the device history of every LIVE account instead.
+check(
+    'the orphan sweep joins the device rows on the same column',
+    strpos($purgeSrc, 'LEFT JOIN users u ON u.user_id = d.user_id') !== false
+);
+// ...and only the account-scoped throttle row: an 'ip' row belongs to the
+// address, not the person, and clearing it would hand a bot a free retry.
+check(
+    'the IP throttle rows are left alone — they are not the account\'s',
+    preg_match("/DELETE FROM login_attempts WHERE scope = 'account' AND subject = :email/", $purgeSrc) === 1
+        && strpos($purgeSrc, "an 'ip' row belongs to the address") !== false
+);
+// A partial deletion is worse than none: rows in one transaction.
+check(
+    'the row deletion is atomic, and a failure is not swallowed',
+    strpos($purgeSrc, '$pdo->beginTransaction();') !== false
+        && strpos($purgeSrc, '$pdo->rollBack();') !== false
+        && strpos($purgeSrc, 'throw $e;') !== false
+        && strpos($deleteProfile, "catch (PDOException \$e)") !== false
+        && strpos($dashboard, "catch (PDOException \$e)") !== false
+);
+// The promise is falsifiable, so it is stated as counters rather than as
+// "it deleted the row": a caller (or a test) can see what went.
+check(
+    'both purges report what they removed',
+    strpos($purgeSrc, 'function isla_purge_counters()') !== false
+        && strpos($purgeSrc, 'function isla_listing_purge(PDO $pdo, int $providerId): array') !== false
+        && strpos($purgeSrc, 'function isla_account_purge(PDO $pdo, int $userId): array') !== false
+);
+// The sweep for what earlier code left behind: device rows with no
+// account, and uploaded pictures no row points at.
+check(
+    'there is one sweep for the leftovers, and it cannot touch a live row',
+    strpos($purgeSrc, 'function isla_purge_orphans(PDO $pdo): array') !== false
+        && strpos($purgeSrc, 'WHERE u.user_id IS NULL') !== false
+        && strpos($purgeSrc, "'/^(user|listing)_\\d+_[0-9a-f]{16}\\.(jpe?g|png)$/i'") !== false
+);
+// The tests themselves were the reason the database filled up with
+// orphans: they signed their fixtures in repeatedly and then deleted the
+// accounts with a bare DELETE.
+check(
+    'the fixtures clean up with the same purge the app deletes with',
+    strpos((string) file_get_contents($root . '/admin_flow_test.php'), 'isla_account_purge(') !== false
+        && strpos((string) file_get_contents($root . '/admin_flow_test.php'), 'isla_listing_purge(') !== false
+        && strpos((string) file_get_contents($root . '/setup_own.php'), 'isla_account_purge(') !== false
 );
 // The schema ships both halves — the column on an existing table and the
 // new table — in the dump AND at runtime, so a live install upgrades

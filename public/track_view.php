@@ -22,7 +22,7 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // --- 3. The provider id must be present --------------------------
-$providerId = (int) ($_GET['provider_id'] ?? 0);
+$providerId = isla_post_int($_GET['provider_id'] ?? 0);
 if ($providerId <= 0) {
     exit;
 }

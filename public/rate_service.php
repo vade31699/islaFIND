@@ -28,21 +28,32 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 require_once __DIR__ . '/../include/db.php';
 
 // --- 5. Collect + validate the fields ----------------------------
-$contractId = (int) ($_POST['contract_id'] ?? 0);
-$rating     = (int) ($_POST['rating'] ?? 0);
+$contractId = isla_post_int($_POST['contract_id'] ?? 0);
+// Read as a strict integer, not a cast: (int) "3abc" is 3, so a
+// malformed value would silently become a valid 3-star rating instead
+// of being reported back to the visitor. A 5 ceiling is the real rule.
+$rating     = isla_post_int($_POST['rating'] ?? 0, 5);
 $comment    = trim($_POST['comment'] ?? '');
 $clientId   = (int) $_SESSION['user_id'];
 
 // Where to send the user afterwards: the messenger thread when the
 // rating came from the chat (JOB DONE), otherwise the Home feed.
-$returnChat = (int) ($_POST['return_chat'] ?? 0);
+$returnChat = isla_post_int($_POST['return_chat'] ?? 0);
 
 $flash = ['type' => 'error', 'msg' => 'Could not submit your rating.'];
 $ok    = false;
 
-// The rating must be a real 1-5 star value.
+// The rating must be a real 1-5 star value. isla_post_int() above has
+// already refused anything that is not digits, so this range test only
+// has to catch 0 and 6-9.
 if ($rating < 1 || $rating > 5) {
     $flash['msg'] = 'Please choose a rating from 1 to 5 stars.';
+} elseif (($commentProblem = isla_text_problem($comment, 1000, 'Review')) !== null) {
+    // The comment is optional, but if one is typed it gets the same
+    // length cap and markup refusal as every other free-text field. A
+    // TEXTAREA's maxlength is not a server-side limit, and the value is
+    // stored, shown on the listing card and mailed to the worker.
+    $flash['msg'] = $commentProblem;
 } else {
     // --- 6. THE VALIDATION GATE ---------------------------------
     // The contract must exist and belong to THIS user as the

@@ -40,9 +40,17 @@ hand-written JavaScript files.
 - **Email verification and one-time codes** through PHPMailer over SMTP, with a
   built-in fallback that shows the code on screen when mail cannot be sent.
 - **Delete account** — a separate danger zone that requires the account password
-  *and* a typed `DELETE`, then removes the account, its listings, chats and
-  every uploaded picture: the account avatar, plus each listing's own cover and
-  album.
+  *and* a typed `DELETE`, then removes **everything**: the account row, its
+  listings, chats, messages, contracts, reviews, saves and interactions (every
+  one of those carries `ON DELETE CASCADE` from `users.id`), the two tables a
+  cascade cannot reach — the device history and the sign-in throttle row that
+  still held the account's **email address** — and every uploaded picture: the
+  account avatar, plus each listing's own cover and album. Files go first,
+  while the rows still name them; the row deletion is one transaction. The
+  whole rule lives in `include/purge.php`, which `delete_profile.php` (delete
+  ONE listing) calls too, so a promise kept here cannot be kept less well
+  there. `isla_purge_orphans()` is the sweep for anything deleted before that
+  rule existed — by a console `DELETE`, an old dump, a test run.
 - **Password strength meter** on sign-up, reset and change-password.
 
 ### Reporting & superadmin
@@ -318,6 +326,11 @@ panel's `admin_asset_url()`) · `head_meta.php` (shared
 loses its session on the next request — called from `db.php`, the one include
 with a connection) · `listing_visibility.php` (the one place that says which
 listings members may discover: the listing's own status *and* its owner's) ·
+`purge.php` (what "deleted" removes: the avatar, every listing's cover and
+album, the device history, the throttle row still holding the account's email,
+and finally the rows — one transaction, so a half-deleted account with live
+listings cannot happen. The listing handler and the danger zone both call it,
+because the rule must not exist twice) ·
 `feed_card.php` (the Home feed's ONE card renderer, shared by the page and by
 the live feed watcher, plus `isla_feed_id_list()` — the canonical id list both
 sides of the watch compare as plain text)

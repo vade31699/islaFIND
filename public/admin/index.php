@@ -257,7 +257,7 @@ if (!in_array($statusFilter, ['pending', 'resolved', 'dismissed', 'all'], true))
 }
 
 // Optional narrowing to one listing.
-$providerFilter = (int) ($_GET['provider'] ?? 0);
+$providerFilter = isla_post_int($_GET['provider'] ?? 0);
 
 // Optional free-text search. Matches a listing's IslaProfile ID
 // (ISLA-000142), the reported listing's OWNER email or member id, and
@@ -379,7 +379,7 @@ $listingOther = [];
 $reporter     = null;
 
 if ($view === 'report') {
-    $reportId = (int) ($_GET['id'] ?? 0);
+    $reportId = isla_post_int($_GET['id'] ?? 0);
 
     if ($reportId > 0) {
         $stmt = $pdo->prepare(
@@ -458,8 +458,8 @@ $ownerListings = [];
 $ownerReportId = 0;
 
 if ($view === 'owner') {
-    $ownerId       = (int) ($_GET['id'] ?? 0);
-    $ownerReportId = (int) ($_GET['report_id'] ?? 0);
+    $ownerId       = isla_post_int($_GET['id'] ?? 0);
+    $ownerReportId = isla_post_int($_GET['report_id'] ?? 0);
 
     if ($ownerId > 0) {
         // Only what the owner view reads — no password hash or

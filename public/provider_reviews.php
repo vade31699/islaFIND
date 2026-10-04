@@ -29,7 +29,7 @@ require_once __DIR__ . '/../include/db.php';
 require_once __DIR__ . '/../include/listing_visibility.php';
 
 // --- 4. Read + validate the provider id -------------------------
-$providerId = (int) ($_GET['provider_id'] ?? 0);
+$providerId = isla_post_int($_GET['provider_id'] ?? 0);
 if ($providerId <= 0) {
     header('Content-Type: application/json');
     echo json_encode(['ok' => false, 'error' => 'No provider given.']);

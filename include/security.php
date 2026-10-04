@@ -306,6 +306,296 @@ function csrf_check(): bool
 }
 
 // ==================================================================
+// INPUT VALIDATION
+// ------------------------------------------------------------------
+// The app's rule: a field that is supposed to hold a NUMBER must
+// receive one, and letters (or anything else) are refused rather than
+// quietly coerced. A phone number is the clearest case — "0912ABC4567"
+// is not a phone number, and a form that accepts it has no idea what
+// the visitor actually typed.
+//
+// WHY NOT is_numeric() / (int):
+//
+//   * (int) "12abc" === 12 and (int) "12.9abc" === 12. A cast never
+//     fails, so it cannot tell you the input was wrong; it silently
+//     turns junk into a plausible-looking number. Every numeric field
+//     therefore CHECKS first and only then casts.
+//   * is_numeric() is looser than it looks: it accepts "1e5", "+5",
+//     " 5", "0x1A" (on some builds) and ".5". A GPS coordinate
+//     arriving as "1e5" or " 12,5" is not a coordinate this app
+//     should store, so the decimal check below is a strict plain-
+//     number pattern instead.
+//
+// These helpers are deliberately small and total: they take any mixed
+// value, never warn, never throw, and never depend on a PHP extension
+// beyond preg_match (which every host has). They are also the single
+// place the rule lives, so a new field gets the same treatment as an
+// existing one instead of re-inventing the check.
+// ==================================================================
+
+/**
+ * isla_is_digits()
+ * Is this value a non-empty run of ASCII digits 0-9 and nothing else?
+ *
+ * The strictest of the numeric checks, and the one a Philippine mobile
+ * number, a rating, a stock count or any id-shaped field wants. It
+ * refuses letters, signs, decimal points, spaces, exponents and the
+ * non-ASCII digits ("٣", "１") that a Unicode-aware \d would allow —
+ * those are letters to a database column and would have to be
+ * normalised before they could ever match a stored value.
+ *
+ * An empty string is NOT digits: a required number field has to say so
+ * rather than pass. Use isla_is_digits_or_empty() for optional fields.
+ *
+ * NOTE the trailing \z rather than the more usual $: in PCRE, $ also
+ * matches just BEFORE a final newline, so "/^[0-9]+$/" happily accepts
+ * "09123456789\n" — a value that is not all digits, and which a caller
+ * that then stores it verbatim would carry a newline into the database.
+ * \z means "absolute end of string" and has no such allowance.
+ *
+ * @param mixed $value Raw value to inspect.
+ * @return bool TRUE when the value is one or more digits only.
+ */
+function isla_is_digits($value): bool
+{
+    return is_string($value) || is_int($value)
+        ? (bool) preg_match('/^[0-9]+\z/', (string) $value)
+        : false;
+}
+
+/**
+ * isla_is_digits_or_empty()
+ * As isla_is_digits(), but a blank value (empty string or only
+ * whitespace) also passes. For genuinely OPTIONAL numeric fields, so
+ * "left blank" stays distinguishable from "typed something wrong".
+ *
+ * @param mixed $value Raw value to inspect.
+ * @return bool TRUE when the value is blank or digits only.
+ */
+function isla_is_digits_or_empty($value): bool
+{
+    return trim((string) $value) === '' || isla_is_digits(trim((string) $value));
+}
+
+/**
+ * isla_clean_digits()
+ * Reduce typed input to its digits, or '' when it had none.
+ *
+ * This is the CONVENIENCE half for a phone field: the visitor types
+ * "+63 917 123 4567" or "(917) 123-4567" and those are perfectly good
+ * ways to write a mobile number, so punctuation is discarded rather
+ * than rejected. The result is then handed to isla_is_digits() (or a
+ * stricter phone rule) so the VALUE that gets stored is digits only.
+ *
+ * Note what is NOT done here: this does not make a number valid. It
+ * only removes human formatting. A field that genuinely must be digits
+ * (an id, a count) should be checked with isla_is_digits() outright
+ * instead — stripping letters out of "12abc" would silently invent a
+ * "12" the visitor never typed.
+ *
+ * @param mixed $value Raw typed value.
+ * @return string The digits found, or '' when there were none.
+ */
+function isla_clean_digits($value): string
+{
+    return preg_replace('/[^0-9]/', '', (string) $value);
+}
+
+/**
+ * isla_normalize_phone()
+ * Turn a typed phone number into its digits, but ONLY when everything
+ * that was not a digit is ordinary human formatting.
+ *
+ * isla_clean_digits() above is deliberately permissive and will strip a
+ * letter along with the punctuation. That is the wrong tool for a phone
+ * field: "0912345ABC6789" would quietly become 09123456789, a number
+ * the visitor never typed that may well belong to somebody else, and the
+ * account would be created against the wrong person. So this helper
+ * forgives a fixed, small set of separators and refuses everything else,
+ * leaving the caller to report a real error.
+ *
+ * @param mixed $value Raw typed value.
+ * @return string|null The digits, or NULL when the input contained
+ *                     anything that is not a digit or a separator.
+ */
+function isla_normalize_phone($value): ?string
+{
+    $raw = trim((string) $value);
+
+    if ($raw === '') {
+        return null;
+    }
+
+    // Forgiven: digits, an international "+", and the separators people
+    // actually type. Anything else (a letter, "#", "%") is a typo.
+    if (!preg_match('/^[0-9+()\s.\-]+$/', $raw)) {
+        return null;
+    }
+
+    $digits = preg_replace('/[^0-9]/', '', $raw);
+
+    return ($digits === '') ? null : $digits;
+}
+
+/**
+ * isla_is_decimal()
+ * Is this value a plain decimal number, of the shape a GPS coordinate
+ * or a price is written in?
+ *
+ * Accepts an optional sign, digits, and at most one dot with digits on
+ * both sides ("-90", "90", "12.345678", "+14.6"). Rejects scientific
+ * notation ("1e5"), a trailing or leading dot (".5", "5."), thousands
+ * separators ("12,5"), hex ("0x1A"), and any letter.
+ *
+ * A dot with nothing after it is refused on purpose: "12." is far more
+ * likely to be a truncated paste than a real latitude.
+ *
+ * @param mixed $value Raw value to inspect.
+ * @return bool TRUE when the value is a plain decimal number.
+ */
+function isla_is_decimal($value): bool
+{
+    return (bool) preg_match('/^[+-]?(?:[0-9]+(?:\.[0-9]+)?)\z/', trim((string) $value));
+}
+
+/**
+ * isla_post_int()
+ * Read a POST/GET value as an id-shaped integer, but ONLY when it is
+ * actually written as one.
+ *
+ * This is the guard for the many `(int) ($_POST['id'] ?? 0)` reads in
+ * the app. The cast alone cannot fail, so "3 OR 1=1" and "3abc" both
+ * arrive as a legitimate-looking 3 and the page quietly acts on the
+ * wrong record. Here anything that is not a plain digit run comes back
+ * as 0, which every caller already treats as "no such id" and refuses.
+ *
+ * The value is still bound as a PDO parameter by the caller, so this
+ * is about correctness and predictable errors, not about SQL safety:
+ * it makes a malformed id an obvious 0 rather than a silently
+ * truncated one.
+ *
+ * @param mixed $value  Raw request value.
+ * @param int   $max    Optional upper bound (inclusive), 0 for none.
+ * @return int The integer, or 0 when the input is not a clean integer.
+ */
+function isla_post_int($value, int $max = 0): int
+{
+    $raw = trim((string) $value);
+
+    if (!preg_match('/^[0-9]{1,18}\z/', $raw)) {
+        return 0;
+    }
+
+    $int = (int) $raw;
+
+    return ($max > 0 && $int > $max) ? 0 : $int;
+}
+
+/**
+ * isla_post_digits()
+ * The digit-string counterpart of isla_post_int(): returns the cleaned
+ * digit run, or '' when the field was blank or held anything else.
+ *
+ * Use it for a numeric field whose EXACT text is stored or compared as
+ * text (a phone number), where a cast would throw away leading zeros —
+ * "09123456789" must not become the integer 9123456789.
+ *
+ * @param mixed $value Raw request value.
+ * @return string The digits, or '' when the input was not digits only.
+ */
+function isla_post_digits($value): string
+{
+    $raw = trim((string) $value);
+    return isla_is_digits($raw) ? $raw : '';
+}
+
+/**
+ * isla_is_login_identifier()
+ * Does this value have the shape of ONE of the two things the sign-in
+ * form accepts: an email address, or a Philippine mobile number?
+ *
+ * The sign-in field is a single box that takes either, so this is the
+ * one place that decides what "either" means. It exists mainly to keep
+ * junk out of the login_attempts table: that table's `subject` column
+ * stores whatever identifier was typed, so an unbounded free-text field
+ * would let one request write a <script> tag or a megabyte into a row
+ * that has no other validation on it.
+ *
+ * Both branches are deliberately permissive about FORMATTING and strict
+ * about ALPHABET — the same split as isla_clean_digits():
+ *
+ *   - a phone is digits after punctuation is dropped, optionally with a
+ *     leading +, and must be 10-15 digits (enough for "09123456789",
+ *     "639171234567" and a country-code form alike);
+ *   - an email must pass filter_var() and must not carry markup.
+ *
+ * @param mixed $value Raw identifier as typed.
+ * @return bool TRUE when it looks like an email or a phone number.
+ */
+function isla_is_login_identifier($value): bool
+{
+    $raw = trim((string) $value);
+
+    if ($raw === '' || contains_html_tag($raw)) {
+        return false;
+    }
+
+    // The phone branch is tried FIRST and is unambiguous: a value made
+    // only of digits, spaces and the usual separators is never a valid
+    // email, and an email is never all digits. Whichever branch matches,
+    // the whole string must be accounted for by that branch's alphabet —
+    // that is what stops "09123456789abc" from passing on the strength
+    // of its digits alone.
+    if (preg_match('/^\+?[0-9]+\z/', $raw)
+        || preg_match('/^[0-9 ()\-.]+\z/', $raw)) {
+        // Counted in digits, so "(917) 123-4567" and "+63 917 123 4567"
+        // are both accepted: 10-15 covers an 11-digit local mobile, a
+        // country-code form and an international number alike.
+        $digits = isla_clean_digits($raw);
+        return strlen($digits) >= 10 && strlen($digits) <= 15;
+    }
+
+    return filter_var($raw, FILTER_VALIDATE_EMAIL) !== false;
+}
+
+/**
+ * isla_text_problem()
+ * The shared "is this free-text value acceptable to store?" check, so
+ * every textarea in the app applies the same limits and the same
+ * markup refusal instead of each one re-inventing both.
+ *
+ * Two layers, and the order matters:
+ *
+ *   1. LENGTH, because a TEXTAREA can be made to submit far more than
+ *      its maxlength attribute claims, and the value is stored,
+ *      emailed to an admin and re-rendered. Too long is reported as a
+ *      problem rather than silently truncated, so the visitor is not
+ *      left wondering why their last sentence vanished.
+ *   2. MARKUP, via contains_html_tag() above — escaping already makes
+ *      the value safe to display, so this is defence in depth: it keeps
+ *      a <script> tag out of the database in the first place.
+ *
+ * @param string $value    The submitted text.
+ * @param int    $maxChars Maximum accepted length in characters.
+ * @param string $label    The field's display name, used to word the
+ *                         message ("Message must be 2000 characters or
+ *                         fewer.").
+ * @return string|null Problem sentence, or NULL when the value is fine.
+ */
+function isla_text_problem(string $value, int $maxChars, string $label = 'This field'): ?string
+{
+    if (mb_strlen($value) > $maxChars) {
+        return "$label must be $maxChars characters or fewer.";
+    }
+
+    if (contains_html_tag($value)) {
+        return "$label cannot contain HTML tags or scripts.";
+    }
+
+    return null;
+}
+
+// ==================================================================
 // LOGIN THROTTLING
 // ------------------------------------------------------------------
 // Brute-forcing a password needs MANY attempts, so the defence is to

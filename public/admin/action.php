@@ -75,7 +75,7 @@ if (!in_array($action, $allowedActions, true)) {
 
 // --- 3. Block a listing ---------------------------------------
 if ($action === 'block_listing') {
-    $providerId = (int) ($_POST['provider_id'] ?? 0);
+    $providerId = isla_post_int($_POST['provider_id'] ?? 0);
     $reason     = trim((string) ($_POST['reason'] ?? ''));
 
     if ($providerId <= 0) {
@@ -143,7 +143,7 @@ if ($action === 'block_listing') {
 
 // --- 4. Unblock a listing -------------------------------------
 if ($action === 'unblock_listing') {
-    $providerId = (int) ($_POST['provider_id'] ?? 0);
+    $providerId = isla_post_int($_POST['provider_id'] ?? 0);
 
     if ($providerId <= 0) {
         adm_redirect('error', 'Which listing?', 'index.php');
@@ -181,8 +181,8 @@ if ($action === 'unblock_listing') {
 // of them exactly as they were — no "which ones did the block hide?"
 // bookkeeping.
 if ($action === 'block_account') {
-    $ownerId  = (int) ($_POST['owner_id'] ?? 0);
-    $reportId = (int) ($_POST['report_id'] ?? 0);
+    $ownerId  = isla_post_int($_POST['owner_id'] ?? 0);
+    $reportId = isla_post_int($_POST['report_id'] ?? 0);
     $reason   = trim((string) ($_POST['reason'] ?? ''));
 
     if ($ownerId <= 0) {
@@ -263,8 +263,8 @@ if ($action === 'block_account') {
 
 // --- 4c. Unblock an account -----------------------------------
 if ($action === 'unblock_account') {
-    $ownerId  = (int) ($_POST['owner_id'] ?? 0);
-    $reportId = (int) ($_POST['report_id'] ?? 0);
+    $ownerId  = isla_post_int($_POST['owner_id'] ?? 0);
+    $reportId = isla_post_int($_POST['report_id'] ?? 0);
 
     if ($ownerId <= 0) {
         adm_redirect('error', 'Which account?', 'index.php');
@@ -303,7 +303,7 @@ if ($action === 'unblock_account') {
 
 // --- 5. Report outcomes ---------------------------------------
 if ($action === 'resolve_report' || $action === 'dismiss_report') {
-    $reportId = (int) ($_POST['report_id'] ?? 0);
+    $reportId = isla_post_int($_POST['report_id'] ?? 0);
     $outcome  = (string) ($_POST['outcome'] ?? '');
     $notes    = trim((string) ($_POST['notes'] ?? ''));
 
@@ -319,6 +319,14 @@ if ($action === 'resolve_report' || $action === 'dismiss_report') {
     }
 
     $notes = substr($notes, 0, 2000);
+
+    // Admin notes are plain text. They are rendered escaped everywhere,
+    // but an internal note is exactly the kind of value that later gets
+    // copied into an email or another system, so markup is refused at
+    // the point it is stored rather than trusted to every future sink.
+    if (contains_html_tag($notes)) {
+        adm_redirect('error', 'Notes cannot contain HTML tags or scripts.', 'index.php?view=reports&status=pending');
+    }
 
     $stmt = $pdo->prepare(
         'UPDATE profile_reports
@@ -351,14 +359,16 @@ if ($action === 'resolve_report' || $action === 'dismiss_report') {
 // --- 6. Notes only --------------------------------------------
 // Available on a closed report: an admin revisiting an old decision can
 // record what they learned without reopening it.
-$reportId = (int) ($_POST['report_id'] ?? 0);
+$reportId = isla_post_int($_POST['report_id'] ?? 0);
 $notes    = substr(trim((string) ($_POST['notes'] ?? '')), 0, 2000);
 
 if ($reportId <= 0) {
     adm_redirect('error', 'Which report?', 'index.php?view=reports&status=all');
 }
 
+if (contains_html_tag($notes)) {
+    adm_redirect('error', 'Notes cannot contain HTML tags or scripts.', 'index.php?view=reports&status=all');
+}
+
 $stmt = $pdo->prepare('UPDATE profile_reports SET admin_notes = :notes WHERE id = :id');
 $stmt->execute([':notes' => $notes !== '' ? $notes : null, ':id' => $reportId]);
-
-adm_redirect('success', 'Note saved.', 'index.php?view=report&id=' . $reportId);

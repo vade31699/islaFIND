@@ -63,7 +63,7 @@ $action = $_POST['action'] ?? '';
 // 7. ACTION: hire (client -> worker)
 // ============================================================
 if ($action === 'hire') {
-    $providerId = (int) ($_POST['recipient_id'] ?? 0);
+    $providerId = isla_post_int($_POST['recipient_id'] ?? 0);
 
     // The recipient must exist AND own an INDIVIDUAL SKILLS
     // islaFIND profile — you can only HIRE a person's skill. The
@@ -231,7 +231,7 @@ if ($action === 'hire') {
 // 8. ACTION: accept / decline (worker decision)
 // ============================================================
 if ($action === 'accept' || $action === 'decline') {
-    $contractId = (int) ($_POST['contract_id'] ?? 0);
+    $contractId = isla_post_int($_POST['contract_id'] ?? 0);
     $newStatus  = $action === 'accept' ? 'accepted' : 'declined';
 
     // The contract must exist and belong to THIS user as the
@@ -292,7 +292,7 @@ if ($action === 'accept' || $action === 'decline') {
 // message so both sides see the decision in the thread.
 // ============================================================
 if ($action === 'accept_request' || $action === 'decline_request') {
-    $clientId = (int) ($_POST['client_id'] ?? 0);
+    $clientId = isla_post_int($_POST['client_id'] ?? 0);
 
     // The target conversation must exist with THIS user as the
     // provider — only the provider being asked can accept or
@@ -349,7 +349,7 @@ if ($action === 'accept_request' || $action === 'decline_request') {
 // tells the worker inside the same thread.
 // ============================================================
 if ($action === 'cancel') {
-    $contractId = (int) ($_POST['contract_id'] ?? 0);
+    $contractId = isla_post_int($_POST['contract_id'] ?? 0);
 
     // The contract must exist and belong to THIS user as the
     // client — only the seeker can cancel their own hire.

@@ -81,6 +81,16 @@ CREATE TABLE IF NOT EXISTS users (
 -- session_id  : ties the row to a live PHP session (unique)
 -- last_login  : last time this session logged in
 -- is_active   : 0 once the session is logged out or revoked
+--
+-- NO FOREIGN KEY on purpose: a device can be recorded before its owner has
+-- an account, and revoking a device has to work on a session id alone. The
+-- cost is that ON DELETE CASCADE cannot clean it up, so deleting an account
+-- must remove its device rows BY HAND — which include/purge.php
+-- (isla_account_purge) does, inside the same transaction as the account row.
+-- Any code that deletes a users row outside that helper leaves device history
+-- behind: device names and IP addresses belonging to somebody who no longer
+-- exists. login_attempts is the same story for a different reason: its
+-- "subject" is a typed identifier, not a user id.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS user_devices (
     id          INT UNSIGNED NOT NULL AUTO_INCREMENT,

@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check()) {
 }
 
 // --- 7. Which listing? (and is it yours?) -----------------------
-$profileId = (int) ($_POST['profile_id'] ?? 0);
+$profileId = isla_post_int($_POST['profile_id'] ?? 0);
 
 $stmt = $pdo->prepare('SELECT * FROM providers WHERE id = :id AND user_id = :uid LIMIT 1');
 $stmt->execute([':id' => $profileId, ':uid' => $user['id']]);
@@ -113,7 +113,7 @@ $action = (string) ($_POST['action'] ?? 'cover');
 // to nobody. No ownership check can be skipped by editing a number
 // in the form.
 if ($action === 'album_remove') {
-    $imageId = (int) ($_POST['image_id'] ?? 0);
+    $imageId = isla_post_int($_POST['image_id'] ?? 0);
 
     if ($imageId <= 0) {
         listingPhotosFlash('error', 'That photo could not be identified.');
