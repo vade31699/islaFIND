@@ -127,6 +127,21 @@ hand-written JavaScript files.
   The position is watched while the page is open, so a real move re-ranks the
   feed live — GPS jitter under ~25 m is ignored so the list never shuffles
   under the visitor's thumb.
+- **The feed is watched live** (`feed_watch.php`): every 15 s — and on every
+  return to the tab — the page sends the ids of the cards it is showing, as one
+  ascending comma-separated list, and the server answers with the same list
+  built from `isla_listing_live_where()`. Equal strings cost ~25 bytes; anything
+  else comes back as `removed` / `added` plus finished card markup from the one
+  shared renderer (`include/feed_card.php`). So a listing that is **deleted from
+  another device**, or blocked by an admin, **leaves the open feed without a
+  refresh** — from the rails, the catalogue, the owner's panel and Saved
+  Listings at once, closing its detail modal if that is what is open — and a
+  newly published listing arrives in place. The poll is a comparison of the two
+  lists as plain strings, so a stale page cannot talk its way past it; the same
+  rule that hides a deleted listing from a fresh page load is the rule that
+  removes it from an open one. Curated rails are never re-ranked by a live
+  arrival (only the catalogue grows), and if the island empties out entirely
+  the page reloads into the server's own empty state.
 - **📖 All Listings** — the **results view** at the bottom of the same Home
   panel. It ships hidden: an empty feed shows the rails, and the search box
   reveals it with every match. A search reads like any other feed section — a
@@ -286,7 +301,8 @@ handler, three actions) ·
 **JSON endpoints** — all in `public/`
 
 `notifications.php` (bell data) · `provider_reviews.php` (review records) ·
-`messenger_poll.php` (new-message polling)
+`messenger_poll.php` (new-message polling) · `feed_watch.php` (the live feed
+watcher: which listings left, which arrived, and the markup for the newcomers)
 
 **Shared includes** — all in `include/`, never web-reachable`security.php` (sessions, CSRF, escaping, login throttling, opt-in headers) ·
 `db.php` (PDO + schema self-check) · `db_settings.php` (the one place that builds
@@ -301,7 +317,10 @@ panel's `admin_asset_url()`) · `head_meta.php` (shared
 `<head>`) · `notifications_bell.php` · `member_guard.php` (a blocked account
 loses its session on the next request — called from `db.php`, the one include
 with a connection) · `listing_visibility.php` (the one place that says which
-listings members may discover: the listing's own status *and* its owner's)
+listings members may discover: the listing's own status *and* its owner's) ·
+`feed_card.php` (the Home feed's ONE card renderer, shared by the page and by
+the live feed watcher, plus `isla_feed_id_list()` — the canonical id list both
+sides of the watch compare as plain text)
 
 **Web root, configuration and assets** (in `public/`) — `.htaccess` (branded
 404, hardening headers, compression) · `manifest.webmanifest` (installable

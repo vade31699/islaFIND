@@ -107,6 +107,16 @@ echo "-- Static: links + assets resolve to real files\n";
 
 $dashboard = file_get_contents($web . '/dashboard.php');
 
+// The Home feed's card renderer is NOT in dashboard.php: it lives in
+// include/feed_card.php because feed_watch.php renders the card of a
+// listing that appears while somebody's feed is open, and a card that
+// arrives live has to be the card a refresh would have produced. Every
+// assertion about the markup INSIDE a .feed-card reads this file, not
+// the dashboard.
+$feedCardSrc = is_file($incDir . '/feed_card.php')
+    ? (string) file_get_contents($incDir . '/feed_card.php')
+    : '';
+
 // The directory page is RETIRED: its listings live in the Home feed's
 // catalogue now, and nothing may link back to the old URL.
 check(
@@ -250,14 +260,14 @@ check(
     'every feed card has a Save heart',
     strpos($dashboard, 'save-btn') !== false && strpos($dashboard, 'save_listing.php') !== false
 );
-$nameAt   = strpos($dashboard, "'<h5>' . \$nameHtml . '</h5>'");
+$nameAt   = strpos($feedCardSrc, "'<h5>' . \$nameHtml . '</h5>'");
 // The USAGE (. $saveControl), not the assignment further up the file.
 // Deliberately matched without the trailing newline: these sources are
 // checked out with CRLF on Windows, and a "\n" in the needle silently
 // stops matching - the assertion then fails for a line-ending reason and
 // looks like a layout regression.
-$saveAt   = strpos($dashboard, '. $saveControl');
-$ratingAt = strpos($dashboard, '. $ratingRow');
+$saveAt   = strpos($feedCardSrc, '. $saveControl');
+$ratingAt = strpos($feedCardSrc, '. $ratingRow');
 check(
     'feedCardHtml puts Save beside the name, above the rating row',
     $nameAt !== false && $saveAt !== false && $ratingAt !== false
@@ -270,7 +280,7 @@ check(
     'only the catalogue cards carry the #listing-N anchor',
     // Gated on $catalogue, so a listing that ALSO sits in a rail renders
     // the anchor exactly once — on its catalogue card.
-    strpos($dashboard, '($catalogue ? \' id="listing-\' . (int) $p[\'id\'] . \'"\' : \'\')') !== false
+    strpos($feedCardSrc, '($catalogue ? \' id="listing-\' . (int) $p[\'id\'] . \'"\' : \'\')') !== false
 );
 
 // Bookmarks must also be reachable from the dashboard itself: a menu
@@ -640,7 +650,9 @@ check(
 check(
     'a listing with no picture of its own falls back to the account avatar',
     strpos((string) file_get_contents($incDir . '/uploads.php'), 'function isla_listing_photo_src(') !== false
-        && strpos($dashboard, 'isla_listing_photo_src($p[\'profile_picture\'] ?? null, $p[\'user_pic\'] ?? null)') !== false
+        // The feed card's fallback (include/feed_card.php) ...
+        && strpos($feedCardSrc, 'isla_listing_photo_src($p[\'profile_picture\'] ?? null, $p[\'user_pic\'] ?? null)') !== false
+        // ... and the owner\'s own card in Settings (dashboard.php).
         && strpos($dashboard, 'isla_listing_photo_src($myProvider[\'profile_picture\'] ?? null, $user[\'profile_picture\'] ?? null)') !== false
 );
 // The owner's own card: a per-listing picture control (NOT the account
@@ -683,7 +695,9 @@ check(
 // on the card so the modal's gallery needs no request.
 check(
     'visitors see the album in the listing detail modal',
-    strpos($dashboard, 'data-album=') !== false
+    // The card carries the album (include/feed_card.php) ...
+    strpos($feedCardSrc, 'data-album=') !== false
+        // ... and the modal fills its gallery from it with no request.
         && strpos($dashboard, 'id="pmGallery"') !== false
         && strpos($dashboard, "card.dataset.album || ''") !== false
         && strpos($cssSrc, '.pm-gallery {') !== false
@@ -832,6 +846,155 @@ check(
             (string) file_get_contents($web . '/report_listing.php'),
             "if (\$_SERVER['REQUEST_METHOD'] !== 'POST')"
         ) !== false
+);
+
+echo "\n-- Static: the live feed watcher (a deleted listing must vanish without a refresh)\n";
+
+// The endpoint and the shared renderer it uses.
+$feedWatch = is_file($web . '/feed_watch.php')
+    ? (string) file_get_contents($web . '/feed_watch.php')
+    : '';
+check('feed_watch.php exists', $feedWatch !== '');
+// A poll is a GET, so it cannot change anything: the whole feature is "tell
+// the page what disappeared", and a GET that could delete a listing would
+// make a prefetch or a crawler dangerous.
+check(
+    'feed_watch.php only ever reads',
+    strpos($feedWatch, "REQUEST_METHOD'] === 'POST'") === false
+        && preg_match('/\b(INSERT|UPDATE|DELETE)\b\s+(INTO|FROM)?\s*(providers|users|user_interactions|provider_album_images|saved_listings)\b/i', $feedWatch) !== 1
+);
+// It answers with the visibility rule, not with "does the row still exist":
+// an admin block has to disappear from an open feed exactly as a self-delete
+// does, and both are the same query.
+check(
+    'feed_watch.php decides with the shared visibility rule',
+    strpos($feedWatch, 'isla_listing_live_where()') !== false
+        && strpos($feedWatch, 'isla_listing_live_join') !== false
+);
+check(
+    'feed_watch.php cannot be cached — it is a status of right now',
+    strpos($feedWatch, 'no-store') !== false
+        && strpos($feedWatch, 'application/json') !== false
+);
+
+// THE CONTRACT. The client sends the ids it is showing as ONE canonical
+// list, and the server compares that list to its own as plain text. A hash
+// shortcut is the trap here: it lets a stale page say "nothing changed"
+// about a feed that has, and the deleted listing stays on screen forever.
+check(
+    'the feed is compared as a canonical id list, not a fingerprint',
+    strpos($feedWatch, 'isla_feed_id_list(') !== false
+        && strpos($feedWatch, "\$have === \$liveCsv") !== false
+        && strpos($feedWatch, 'sig') === false
+);
+check(
+    'the client builds that same list, ascending and with no repeats',
+    strpos($feedCardSrc, 'function isla_feed_id_list(') !== false
+        && strpos($dashboard, 'function feedShownList()') !== false
+        && strpos($dashboard, "feedShownIds().join(',')") !== false
+);
+check(
+    'a poll sends the whole list, so an id the server dropped is always found',
+    strpos($dashboard, "fetch('feed_watch.php?have='") !== false
+        && strpos($dashboard, "credentials: 'same-origin', cache: 'no-store'") !== false
+);
+
+// What the diff has to be able to do, on the client. A listing can be
+// sitting in three places at once (a rail, the catalogue, the owner's own
+// panel), so removing "the card" is not enough.
+check(
+    'a vanished listing is removed from every copy of it',
+    strpos($dashboard, '.feed-card[data-id="' ) !== false
+        && strpos($dashboard, '#dashIsla [data-listing="') !== false
+        && strpos($dashboard, "getElementById('saved-listing-'") !== false
+);
+check(
+    'the detail modal of a vanished listing closes itself',
+    strpos($dashboard, 'if (currentProvider && goneSet[String(currentProvider.id)])') !== false
+        && strpos($dashboard, 'closeModals();') !== false
+);
+check(
+    'a newcomer is inserted as server-rendered markup and wired like the rest',
+    strpos($dashboard, 'holder.innerHTML = html;') !== false
+        && strpos($dashboard, 'wireFeedCard(card);') !== false
+);
+check(
+    'the diff cannot kill the watch: the in-flight flag is always released',
+    strpos($dashboard, '.catch(function () {') !== false
+        && strpos($dashboard, '.then(function () { feedBusy = false; });') !== false
+);
+// A page that has lost its account (or was signed out on another device) must
+// not keep a feed that no longer belongs to anyone: reload and let the
+// dashboard's own guard send it to the login.
+check(
+    'a dead session reloads the page instead of feeding it',
+    strpos($dashboard, 'if (!data || data.ok !== true)') !== false
+);
+// Nothing is guessed client-side: the card that arrives came from the server.
+check(
+    'feed_watch.php renders newcomers with the ONE shared card renderer',
+    strpos($feedWatch, 'feedCardHtml(') !== false
+        && strpos($feedWatch, 'include/feed_card.php') !== false
+        && strpos($dashboard, 'include/feed_card.php') !== false
+);
+check(
+    'the watcher has a toast, and style.css keeps it off the navigation',
+    strpos($dashboard, 'id="feedLiveToast"') !== false
+        && strpos($cssSrc, '.feed-live-toast {') !== false
+);
+check(
+    'the poll runs on a timer and again when the app comes back',
+    strpos($dashboard, 'const FEED_POLL_MS = 15000;') !== false
+        && strpos($dashboard, "window.addEventListener('focus', pollFeed)") !== false
+        && strpos($dashboard, "document.addEventListener('visibilitychange'") !== false
+);
+check(
+    'feed_watch.php is kept out of the crawlers',
+    strpos((string) file_get_contents($web . '/robots.txt'), 'Disallow: /feed_watch.php') !== false
+);
+
+// And the helper itself, on its own terms: ascending, unique, no empty holes.
+// Called, not just read — a comparator that only works for one list length is
+// exactly the bug this replaces.
+require_once $incDir . '/feed_card.php';
+check(
+    'isla_feed_id_list() canonicalises the wire list',
+    isla_feed_id_list([786578, 786577, 786577]) === '786577,786578'
+        && isla_feed_id_list([]) === ''
+        && isla_feed_id_list([10, 9, 100]) === '9,10,100'
+        && isla_feed_id_list([3, 'x', 3]) === '3',
+    '786577,786578 / "" / 9,10,100 / "3"'
+);
+check(
+    'the old fingerprint helper is gone',
+    strpos($feedCardSrc, 'isla_feed_signature') === false
+);
+
+// A card that arrives live has to be the card a refresh would have produced,
+// which is only true if both ends call the SAME function. Count where it is
+// DEFINED, not where it is named: the endpoint's header comment has to be
+// allowed to talk about the renderer by name.
+$rendererDefs = 0;
+foreach (glob($web . '/*.php') ?: [] as $phpFile) {
+    if (substr_count((string) file_get_contents($phpFile), 'function feedCardHtml(') > 0) {
+        $rendererDefs++;
+    }
+}
+foreach (glob($incDir . '/*.php') ?: [] as $phpFile) {
+    if (substr_count((string) file_get_contents($phpFile), 'function feedCardHtml(') > 0) {
+        $rendererDefs++;
+    }
+}
+check(
+    'the page and the watcher share one card renderer, not two copies',
+    $rendererDefs === 1
+        && strpos($feedCardSrc, 'function feedCardHtml(') !== false
+        && strpos($dashboard, 'function feedCardHtml(') === false
+        && strpos($dashboard, 'include/feed_card.php') !== false
+        && strpos($feedWatch, 'include/feed_card.php') !== false
+        && substr_count($dashboard, 'feedCardHtml(') === 3
+        && substr_count($feedWatch, 'feedCardHtml(') >= 1,
+    'one definition, in include/feed_card.php; called by both ends'
 );
 
 // ============================================================

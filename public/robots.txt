@@ -21,6 +21,7 @@ Disallow: /dashboard.php
 Disallow: /delete_conversations.php
 Disallow: /delete_message.php
 Disallow: /delete_profile.php
+Disallow: /feed_watch.php
 Disallow: /hire_action.php
 Disallow: /logout.php
 Disallow: /messenger.php

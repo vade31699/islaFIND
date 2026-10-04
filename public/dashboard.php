@@ -35,6 +35,7 @@ require_once __DIR__ . '/../include/categories.php';
 require_once __DIR__ . '/../include/uploads.php';
 require_once __DIR__ . '/../include/reporting.php';   // the report reasons offered in the modal
 require_once __DIR__ . '/../include/listing_visibility.php'; // who may discover a listing (blocked listing vs blocked owner)
+require_once __DIR__ . '/../include/feed_card.php';    // the Home feed's ONE card renderer
 require_once __DIR__ . '/../include/mailer.php';      // the e-mail-change code (6e)
 
 // How long the 6-digit "confirm your new address" code stays valid.
@@ -743,231 +744,11 @@ if (!$devices) {
 //                 view/inquire/search), quality (rating + reviews),
 //                 and recency (fresh listings get a boost).
 
-// A provider card is rendered identically in both modes. Cards are
-// account-synced: the photo and phone come from users, INDIVIDUAL
-// listings show the account holder's name, BUSINESS listings show
-// their own name. Each card also shows THIS listing's rating (avg
-// stars + review count) aggregated from the reviews table.
-// $catalogue = true renders the card for the Home feed's 📖 All Listings
-// section (what directory.php used to be). It is the ONLY place a card
-// carries id="listing-N", so that anchor stays unique even though the
-// same listing can also sit in a rail — save_listing.php returns the
-// visitor to #listing-N after a toggle, and an anchor that matched two
-// cards would scroll to whichever came first.
-function feedCardHtml(array $p, array $categories, int $myId, string $csrf, array $savedIds = [], bool $catalogue = false, array $albums = []): string
-{
-    $catLabel = htmlspecialchars($categories[$p['selected_title']] ?? $p['selected_title']);
-    // Business listings keep their own name; individuals use the account name.
-    $name     = ($p['profile_type'] === 'business' && $p['name'] !== null && $p['name'] !== '')
-        ? $p['name']
-        : $p['user_name'];
-    $nameHtml = htmlspecialchars($name);
-    // A listing can carry a picture of its OWN (providers.profile_picture,
-    // set from Settings -> islaFIND Profile); when it has none the account
-    // avatar is shown, exactly as before that column existed. The fallback
-    // lives in one function so this card, the detail modal and the owner's
-    // own panel can never disagree about which photo is on the listing.
-    $pic      = isla_listing_photo_src($p['profile_picture'] ?? null, $p['user_pic'] ?? null);
-    $jobs     = (int) ($p['completed_jobs'] ?? 0);   // hired + finished jobs
-    $avgR     = round((float) ($p['avg_rating'] ?? 0), 1);
-    $revN     = (int) ($p['review_count'] ?? 0);
-    // "On the Job" applies ONLY to Individual Skills listings, and
-    // only once the employer + worker agreed (an accepted hire).
-    // Business profiles never carry the badge; inquiries stay open
-    // either way.
-    $onJob = !empty($p['on_job']) && $p['profile_type'] === 'individual';
-
-    // Full-width strip at the very top of the card so the status is
-    // visible in the feed itself, not only after opening the detail.
-    $onJobBadge = $onJob
-        ? '<div class="feed-card-onthejob"><span class="otj-dot"></span>On the Job</div>'
-        : '';
-
-    // Avatar: account photo or initials fallback.
-    $initials = '';
-    foreach (preg_split('/\s+/', trim($name)) as $part) {
-        if ($part !== '' && strlen($initials) < 2) {
-            $first = function_exists('mb_substr') ? mb_substr($part, 0, 1) : substr($part, 0, 1);
-            $initials .= function_exists('mb_strtoupper') ? mb_strtoupper($first) : strtoupper($first);
-        }
-    }
-    $avatar = $pic
-        ? '<img src="' . htmlspecialchars($pic) . '" alt="' . $nameHtml . '" class="feed-card-pic">'
-        : '<span class="feed-card-pic feed-card-pic-placeholder">' . htmlspecialchars($initials ?: '?') . '</span>';
-
-    // Per-listing rating row (stars + number + review count).
-    if ($revN > 0) {
-        $ratingRow = '<div class="card-rating"><span class="stars" aria-hidden="true">'
-            . str_repeat('★', max(1, min(5, (int) round($avgR))))
-            . '</span><span class="rating-num">' . number_format($avgR, 1)
-            . '</span><span class="rating-count">(' . $revN . ' review' . ($revN === 1 ? '' : 's') . ')</span></div>';
-    } else {
-        $ratingRow = '<div class="card-rating"><span class="rating-none">No reviews yet</span></div>';
-    }
-
-    // NOTE: the account phone is deliberately NOT shown on the
-    // public profile card. Contact details are sensitive, so the
-    // provider decides when (and whether) to share their number
-    // inside the messenger conversation — never on a public feed.
-
-    // CONTEXTUAL FIELD: the profile type decides what extra detail
-    // the card shows.
-    //   - INDIVIDUAL SKILLS -> a short description snippet (the
-    //     full text lives in the detail modal).
-    //   - BUSINESS -> an "N units available" badge (rooms, bikes...).
-    $isBusiness = $p['profile_type'] === 'business';
-    $desc       = trim((string) ($p['profile_description'] ?? ''));
-    $hasUnits   = isset($p['unit_inventory']) && $p['unit_inventory'] !== null;
-    $units      = $hasUnits ? (int) $p['unit_inventory'] : 0;
-    if ($isBusiness && $hasUnits) {
-        // Only render the badge when the owner actually set a count
-        // (a business that never entered units shows nothing).
-        $contextBlock = '<div class="card-units">'
-            . '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>'
-            . '<span>' . $units . ' unit' . ($units === 1 ? '' : 's') . ' available</span>'
-            . '</div>';
-    } elseif ($desc !== '') {
-        $snippet = function_exists('mb_substr')
-            ? (mb_strlen($desc) > 110 ? mb_substr($desc, 0, 110) . '…' : $desc)
-            : (strlen($desc) > 110 ? substr($desc, 0, 110) . '…' : $desc);
-        $contextBlock = '<p class="card-desc">' . htmlspecialchars($snippet) . '</p>';
-    } else {
-        $contextBlock = '';
-    }
-
-    // Compact location chip on every feed card: "Barangay, Municipality"
-    // (e.g. "Poblacion, Madridejos") so the municipality is visible
-    // right in the Home feed — same style as the Directory badge.
-    $locMun  = trim((string) ($p['municipality'] ?? ''));
-    $locBgy  = trim((string) ($p['barangay'] ?? ''));
-    $locChip = ($locMun !== '' || $locBgy !== '')
-        ? '<span class="card-location">'
-            . '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>'
-            . '<span>' . htmlspecialchars(trim($locBgy . ', ' . $locMun, ", \n\r\t")) . '</span>'
-            // Proximity slot: filled by the Home feed's script while
-            // search results are ranked nearest-first, and left empty +
-            // hidden otherwise so the pill never grows for a card (or a
-            // sort) that has no distance to show.
-            . '<span class="card-distance" hidden></span>'
-            . '</span>'
-        : '';
-
-    // --- Pinned location (fed to the detail modal) ---------------
-    // Only a BUSINESS listing whose owner pinned GPS coordinates on
-    // the create/edit form is routable. The values ride along as
-    // data-map-* attributes on the card; the modal's "Get Route"
-    // button is filled from them when the card is tapped, so Google
-    // Maps shows the path from the visitor's current position to the
-    // business's pin.
-    $mapLat = $p['latitude']  ?? null;
-    $mapLng = $p['longitude'] ?? null;
-    $hasPin = $isBusiness && $mapLat !== null && $mapLng !== null;
-
-    // Distance ordering (the nearest-first search results) needs a pin
-    // on EVERY listing, not just the businesses the detail modal can
-    // route to: an INDIVIDUAL skill carries its own GPS pin from the
-    // create form too. Keep a separate pair so the modal's
-    // business-only route data above stays exactly as it was.
-    $geoLat = $p['latitude']  ?? null;
-    $geoLng = $p['longitude'] ?? null;
-    $hasGeo = $geoLat !== null && $geoLat !== '' && $geoLng !== null && $geoLng !== '';
-
-    // The feed card is COMPACT by design: it shows only the profile
-    // details (photo, name, badge, jobs, rating, phone, and the
-    // contextual description / units). Every action — including the
-    // "Get Route" link for a pinned business — lives in the detail
-    // modal that opens when the card is tapped. All the detail fields
-    // are carried as data attributes so the modal can be filled
-    // without a reload.
-    //
-    // NOTE: the card does NOT carry data-map-url. The stored
-    // google_maps_url is only the destination-only deep link built at
-    // save time; the modal builds a better one from the coordinates
-    // below (with the visitor's own origin), so shipping the stored
-    // copy would just be a misleading second source of truth.
-    $own = (int) $p['user_id'] === $myId ? '1' : '0';
-
-    // The album rides along as a pipe-separated list of URLs so the
-    // detail modal can build its gallery the instant the card is
-    // tapped — no request, no spinner. '|' cannot occur in a URL that
-    // isla_upload_url() builds (it rawurlencodes the stored name), so
-    // it is a safe separator, and the whole attribute is escaped once
-    // as the browser hands it back verbatim through dataset.album.
-    $albumUrls = [];
-    foreach ($albums as $albumPhoto) {
-        $albumUrls[] = isla_upload_url((string) $albumPhoto['name']);
-    }
-    $albumAttr = $albumUrls === [] ? '' : htmlspecialchars(implode('|', $albumUrls));
-
-    // --- Save heart, BESIDE the name ----------------------------
-    // The same POST toggle the directory uses (save_listing.php), so a
-    // listing can be bookmarked straight from the Home feed without
-    // opening the detail modal first. Rendered for OTHER people's
-    // listings only: your own are managed in Settings and the server
-    // refuses to bookmark them. The card's own click / keydown handler
-    // deliberately steps aside for this control (see the .inline-save
-    // guard in the feed wiring), so the heart never opens the modal by
-    // accident on the way to the POST.
-    $isSaved     = isset($savedIds[(int) $p['id']]);
-    $saveControl = $own === '1' ? '' : '<form action="save_listing.php" method="POST" class="inline-save">'
-        . '<input type="hidden" name="csrf_token" value="' . $csrf . '">'
-        . '<input type="hidden" name="provider_id" value="' . (int) $p['id'] . '">'
-        . '<input type="hidden" name="return_to" value="home">'
-        . '<button type="submit" class="save-btn' . ($isSaved ? ' is-saved' : '') . '"'
-        . ' aria-pressed="' . ($isSaved ? 'true' : 'false') . '"'
-        . ' title="' . ($isSaved ? 'Remove from your saved listings' : 'Save this listing for later') . '">'
-        . '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>'
-        . '<span>' . ($isSaved ? 'Saved' : 'Save') . '</span>'
-        . '</button>'
-        . '</form>';
-
-    $html = '<div class="feed-card feed-card-clickable" role="button" tabindex="0"'
-        // The catalogue's cards are the deep-linkable ones (see above).
-        . ($catalogue ? ' id="listing-' . (int) $p['id'] . '"' : '')
-        . ' data-id="' . (int) $p['id'] . '"'
-        . ' data-name="' . $nameHtml . '"'
-        . ' data-title="' . $catLabel . '"'
-        // Category SLUG (not the label): the catalogue's category chips
-        // filter on it, and the label is already rendered as the badge.
-        . ' data-cat="' . htmlspecialchars($p['selected_title']) . '"'
-        . ' data-type="' . htmlspecialchars($p['profile_type']) . '"'
-        . ' data-barangay="' . htmlspecialchars($p['barangay'] ?? '') . '"'
-        . ' data-municipality="' . htmlspecialchars($p['municipality'] ?? '') . '"'
-        . ' data-rating="' . number_format($avgR, 1) . '"'
-        . ' data-reviews="' . $revN . '"'
-        . ' data-onjob="' . ($onJob ? '1' : '0') . '"'
-        . ' data-pic="' . ($pic ? htmlspecialchars($pic) : '') . '"'
-        // Only a BUSINESS listing ever has album rows (upload_listing_photos.php
-        // refuses the album for an individual one), so an empty attribute here
-        // simply means "no extra photos".
-        . ' data-album="' . $albumAttr . '"'
-        . ' data-desc="' . htmlspecialchars($desc) . '"'
-        . ' data-units="' . ($isBusiness && $hasUnits ? (int) $units : '') . '"'
-        . ' data-map-lat="' . ($hasPin ? htmlspecialchars((string) $mapLat) : '') . '"'
-        . ' data-map-lng="' . ($hasPin ? htmlspecialchars((string) $mapLng) : '') . '"'
-        // The search ranking's coordinates: present on every pinned
-        // listing (business OR individual), so a search can measure and
-        // order results by distance from the visitor.
-        . ' data-geo-lat="' . ($hasGeo ? htmlspecialchars((string) $geoLat) : '') . '"'
-        . ' data-geo-lng="' . ($hasGeo ? htmlspecialchars((string) $geoLng) : '') . '"'
-        . ' data-saved="' . (isset($savedIds[(int) $p['id']]) ? '1' : '0') . '"'
-        . ' data-own="' . $own . '">'
-        . $onJobBadge
-        . '<div class="feed-card-top">'
-        . $avatar
-        . '<div class="feed-card-head">'
-        . '<h5>' . $nameHtml . '</h5>'
-        . '<span class="provider-badge">' . $catLabel . '</span>'
-        . '</div>'
-        . $saveControl
-        . '</div>'
-        . $ratingRow
-        . $locChip
-        . $contextBlock
-        . '<span class="feed-card-hint">Tap for details &#8250;</span>'
-        . '</div>';
-    return $html;
-}
+// The card renderer itself lives in include/feed_card.php, NOT here:
+// the live-feed poll (public/feed_watch.php) renders the card of a
+// listing that appears while this page is open, and it must produce
+// exactly the markup a refresh would have produced. One renderer,
+// two callers.
 
 // Category affinity: how many interactions (views/inquiries/searches)
 // the user has per provider category — their "taste" signal.
@@ -1633,7 +1414,11 @@ include __DIR__ . '/../include/head_meta.php';
                                     }
                                 }
                                 ?>
-                                <div class="provider-card isla-mine">
+                                <!-- data-listing is the hook the live-feed poll uses: if this
+                                     listing is deleted from another device while this page sits
+                                     open, the card goes with it instead of inviting a tap on
+                                     something that is already gone. -->
+                                <div class="provider-card isla-mine" data-listing="<?php echo (int) $myProvider['id']; ?>">
                                     <?php if ($myListingBlocked): ?>
                                         <div class="listing-blocked-warning" role="status">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
@@ -2661,6 +2446,15 @@ include __DIR__ . '/../include/head_meta.php';
         </a>
     </nav>
 
+    <!-- ============ Live-feed notice ==============================
+         Printed once and filled in by the Home feed's poll: a card
+         was removed from the island (deleted by its owner, deleted
+         with the owner's account, or blocked by an admin) while this
+         page was open, so it vanished without a reload. aria-live
+         because a screen-reader user would otherwise hear a card
+         disappear silently. -->
+    <div class="feed-live-toast" id="feedLiveToast" role="status" aria-live="polite" hidden></div>
+
     <script>
         // ============================================================
         // View switcher — slides between the seven panels
@@ -3457,7 +3251,11 @@ include __DIR__ . '/../include/head_meta.php';
         // is re-rendered from the server when it is next opened.
         let savedPanelStale = false;
 
-        document.querySelectorAll('.feed-card').forEach(function (card) {
+        // Wire ONE card to open its own detail on tap. A function rather
+        // than a loop body because a listing can also ARRIVE while the
+        // page sits open (the live-feed poll below), and a card that
+        // arrives has to be as tappable as one the server rendered.
+        function wireFeedCard(card) {
             // The Save heart is a real form living inside the card, so a tap
             // on it (or Enter / Space with it focused) must POST to
             // save_listing.php and NOT open the detail modal underneath.
@@ -3479,7 +3277,9 @@ include __DIR__ . '/../include/head_meta.php';
                     openProviderDetail(card);
                 }
             });
-        });
+        }
+
+        document.querySelectorAll('.feed-card').forEach(wireFeedCard);
 
         // ---- Bookmark in place: no reload for a heart tap ------------
         // The heart stays a real form (save_listing.php), so it works with
@@ -3997,6 +3797,211 @@ include __DIR__ . '/../include/head_meta.php';
         // The catalogue starts in server order; paint its count once so
         // the toolbar is never blank before the first interaction.
         applyFeedFilters();
+
+        // ---- Live feed: the island changing under the page ---------
+        // Everything above is a SNAPSHOT. The feed was rendered once by
+        // the server and the search box then filters those cards in the
+        // DOM — fast, and it lets one search box reach every listing
+        // rather than the handful a rail happens to carry. The cost is
+        // that the page keeps showing what the island looked like when
+        // it was rendered: a listing whose owner deletes it (or whose
+        // whole account is deleted, or which an admin blocks) would sit
+        // on this screen, tappable, until the next navigation — the app
+        // offering a service that no longer exists.
+        //
+        // So the feed is watched. feed_watch.php is asked one cheap
+        // question every 15 seconds: "is what I am showing still what is
+        // on the island?" It only answers in full when it is not, and
+        // then it says which ids LEFT, which arrived, and hands back
+        // finished card markup for the newcomers (from the same renderer
+        // the page uses, so a card that arrives live is the card a
+        // refresh would have produced).
+        const FEED_POLL_MS = 15000;
+
+        let feedBusy        = false;      // one poll at a time
+        let feedToastTimer  = null;
+
+        // What is on screen right now, as ids. Read back out of the DOM
+        // rather than kept in a variable of its own, so the poll can never
+        // be told something the cards do not show: a listing appears in a
+        // rail AND in the catalogue on purpose, and this is the set of
+        // them. Cards hidden by the current search still count — they are
+        // on the page, so they have to be removed from it too.
+        function feedShownIds() {
+            const seen = {};
+            document.querySelectorAll('.feed-card[data-id]').forEach(function (card) {
+                const id = parseInt(card.dataset.id, 10);
+                if (!isNaN(id)) { seen[id] = true; }
+            });
+            return Object.keys(seen).map(Number).sort(function (a, b) { return a - b; });
+        }
+
+        // The same list as one string, ascending — the canonical shape
+        // isla_feed_id_list() builds on the server, so the two can be
+        // compared as plain text and "nothing moved" needs no diff.
+        function feedShownList() {
+            return feedShownIds().join(',');
+        }
+
+        // A short, non-blocking note that the feed moved under the
+        // visitor's thumb. Without it a card vanishing looks like the
+        // app misbehaving; with it, the disappearance is explained.
+        function feedToast(message) {
+            const toast = document.getElementById('feedLiveToast');
+            if (!toast) { return; }
+            toast.textContent = message;
+            toast.hidden = false;
+            if (feedToastTimer !== null) { clearTimeout(feedToastTimer); }
+            feedToastTimer = setTimeout(function () {
+                toast.hidden = true;
+                feedToastTimer = null;
+            }, 5000);
+        }
+
+        // A listing left the island: take out EVERY trace of it — the
+        // catalogue card, the rail card it was recommended in, the
+        // owner's own card in Settings and its Saved Listings row. A
+        // card you can still tap for a listing that is gone is worse
+        // than no card, because the tap leads to a dead detail modal.
+        function dropListing(id) {
+            const sid = String(id);
+            document.querySelectorAll('.feed-card[data-id="' + sid + '"]').forEach(function (card) {
+                card.remove();
+            });
+            const own = document.querySelector('#dashIsla [data-listing="' + sid + '"]');
+            if (own) { own.remove(); }
+            const saved = document.getElementById('saved-listing-' + sid);
+            if (saved) { saved.remove(); }
+        }
+
+        // A listing arrived: the server already sent finished markup for
+        // it, so the only work is putting it where it belongs, wiring it
+        // to the same tap handler the other cards have, and letting the
+        // existing filter/sort/distance passes place it.
+        //
+        // It joins the 📖 All Listings grid — the complete, uncapped list,
+        // so that view is correct again immediately. The rails above are a
+        // curated top-N that a full ranking pass (affinity, jobs,
+        // engagement) chose on the server; this cheap poll deliberately
+        // does not re-run that, so a brand-new listing waits for the next
+        // visit to earn a place in a rail instead of jumping in unranked.
+        function addListing(id, html) {
+            if (!feedGrid || !html) { return false; }
+            // Idempotent: a listing is only ever sent as "new" when it is
+            // absent from what this page reported showing, so this should
+            // not fire — but a duplicated card is a permanent ghost, and
+            // one query is cheaper than explaining it later.
+            if (document.querySelector('.feed-card[data-id="' + String(id) + '"]')) {
+                return false;
+            }
+            const holder = document.createElement('div');
+            holder.innerHTML = html;                 // rendered, escaped markup
+            const card = holder.firstElementChild;
+            if (!card) { return false; }
+            feedGrid.appendChild(card);
+            wireFeedCard(card);
+            return true;
+        }
+
+        // Put the feed back in order after the DOM changed: the search
+        // and chips decide what is visible and recount the results, the
+        // sort puts the newcomer in order and relabels distances, and the
+        // track height follows the Settings panel if a card left it.
+        function feedRearrange() {
+            applyFeedFilters();
+            applyFeedSort();
+            applyRailDistanceOrder();
+            syncTrackHeight();
+        }
+
+        // The diff the server sent. Nothing here is a guess: it only ever
+        // removes ids the server says are gone and inserts markup the
+        // server rendered.
+        function applyFeedDiff(data) {
+            if (data.same) { return; }        // the island has not moved
+
+            const removed = data.removed || [];
+            const added   = data.added || [];
+            const cards   = data.cards || {};
+
+            // The detail modal belongs to ONE listing. If that is the one
+            // that just disappeared, close the overlay instead of leaving
+            // a full profile of a deleted listing on screen — with its
+            // Inquire button, which the server would now refuse anyway.
+            const goneSet = {};
+            removed.forEach(function (id) { goneSet[String(id)] = true; });
+            if (currentProvider && goneSet[String(currentProvider.id)]) {
+                closeModals();
+                currentProvider = null;
+            }
+
+            removed.forEach(dropListing);
+            added.forEach(function (id) { addListing(id, cards[String(id)]); });
+
+            // The island can empty out entirely while someone is looking
+            // at it (the last listing deleted from another device). The
+            // catalogue section is rendered only when the page had
+            // listings to put in it, so with no grid there is nothing to
+            // insert into and the honest answer is the server's own.
+            if (added.length && !feedGrid) {
+                window.location.reload();
+                return;
+            }
+
+            feedRearrange();
+
+            // Say what happened, in the visitor's terms.
+            const notes = [];
+            if (removed.length) {
+                notes.push(removed.length + ' listing' + (removed.length === 1 ? '' : 's') + ' removed');
+            }
+            if (added.length) {
+                notes.push(added.length + ' new listing' + (added.length === 1 ? '' : 's') + ' on the island');
+            }
+            if (notes.length) { feedToast('islaFIND \u00b7 ' + notes.join(' \u00b7 ')); }
+        }
+
+        function pollFeed() {
+            // A backgrounded app has nothing to show and a metered
+            // connection has no reason to answer: skip the request
+            // entirely and try again when the app comes back.
+            if (feedBusy || document.hidden) { return; }
+            if (typeof window.fetch !== 'function') { return; }
+
+            feedBusy = true;
+            fetch('feed_watch.php?have=' + encodeURIComponent(feedShownList()),
+                  { credentials: 'same-origin', cache: 'no-store' })
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    // ok:false is the session (or the whole account) being
+                    // gone. Reloading is the honest response: the page
+                    // this poll belongs to is no longer valid, and
+                    // dashboard.php's own guard sends it to the login.
+                    if (!data || data.ok !== true) {
+                        window.location.reload();
+                        return;
+                    }
+                    applyFeedDiff(data);
+                })
+                .catch(function () {
+                    // Offline, timeout, bad JSON — or a bug in the diff
+                    // itself, which must not be allowed to kill the watch.
+                    // Keep showing what we have and let the next poll try
+                    // again; the flag below is always released.
+                })
+                .then(function () { feedBusy = false; });
+        }
+
+        // Same cadence as the notification bell (30s) but a little
+        // tighter, because this is what people are actually LOOKING at:
+        // the feed. The listener that closes the overlay also runs when
+        // the app is brought back to the front, so returning to the app
+        // after a deletion is enough to see it gone.
+        setInterval(pollFeed, FEED_POLL_MS);
+        window.addEventListener('focus', pollFeed);
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) { pollFeed(); }
+        });
 
         // Clear (x): empty the box and restore the full feed in one tap.
         if (homeSearchClear) {

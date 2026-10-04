@@ -2665,6 +2665,46 @@ body {
 
 /* ---------- Home feed (recommendations) ---------- */
 
+/* The live-feed notice (see feed_watch.php and the poll in
+   dashboard.php): a card was removed from the island, or a new one
+   appeared, while this page sat open. It floats just above the
+   bottom nav so it never covers a card the visitor is reading, and
+   it is BELOW the modals (z-index 90 in the overlay scale) so a
+   listing's detail always wins over it. */
+.feed-live-toast {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    /* Clear the bottom nav (its own height + the home-indicator inset). */
+    bottom: calc(74px + env(safe-area-inset-bottom));
+    z-index: 90;
+    margin: 0 auto;
+    max-width: 420px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background-color: #1f2a30;
+    color: #ffffff;
+    font-size: 13px;
+    line-height: 1.4;
+    text-align: center;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+    animation: feed-live-toast-in 0.25s ease;
+    pointer-events: none;      /* a notice is never a tap target */
+}
+
+@keyframes feed-live-toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Respect a phone that asks for less motion: the toast still appears,
+   it just arrives without sliding. */
+@media (prefers-reduced-motion: reduce) {
+    .feed-live-toast {
+        animation: none;
+    }
+}
+
 /* A category section in the cold-start feed */
 .feed-section {
     margin: 18px 0 0 0;
