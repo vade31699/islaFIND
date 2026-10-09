@@ -420,9 +420,10 @@ function isla_s3_put(string $key, string $body, string $contentType = 'applicati
  * It exists for public/image.php. A bucket with no public URL of its
  * own cannot be read by a browser, but it can be read by whoever
  * holds the credentials, and the app does. That signed read is what
- * lets an upload be stored and displayed even when AWS_URL was never
- * set — the variable is a fast path (and a CDN's cache), not a
- * requirement.
+ * lets an upload be stored and displayed with no public origin
+ * configured at all — UPLOADS_URL_BASE is a fast path (and a CDN's
+ * cache), not a requirement, and a value that stops resolving cannot
+ * take the pictures down with it.
  *
  * @param string $key Object key (bare filename here).
  * @return array{ok:bool,status:int,error:string,body:string}
