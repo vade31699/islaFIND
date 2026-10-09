@@ -11,11 +11,12 @@
 //
 // WHY THIS MATTERS
 // A host that rebuilds its container on every deploy has an EPHEMERAL
-// filesystem: public/uploads/ is wiped on each release, so pictures
-// would vanish. Such a host keeps them in object storage instead. The
-// read side of that is ready here (UPLOADS_URL_BASE, below); the
-// write side is not implemented yet, on purpose — see the note at the
-// bottom of this file.
+// filesystem: public/uploads/ is wiped on each release, so a picture
+// written to disk vanishes while its row still names it — every card
+// then shows a broken image. Such a host keeps the pictures in object
+// storage instead. BOTH halves of that are here now: UPLOADS_URL_BASE
+// moves reads to the bucket, and UPLOADS_DRIVER=remote moves writes
+// there through include/s3.php (AWS Signature Version 4).
 // ============================================================
 
 require_once __DIR__ . '/env.php';
@@ -34,9 +35,11 @@ const ISLA_ALBUM_MAX_PHOTOS = 5;
 
 /**
  * isla_uploads_driver()
- * Which backend stores the files. 'local' is the default and the only
- * one implemented; an unrecognised value falls back to 'local' so a
- * typo can never send writes somewhere that does not exist.
+ * Which backend stores the files. 'local' is the default (the WAMP
+ * disk); 'remote' writes to S3-compatible object storage through
+ * include/s3.php, which is what a host with an ephemeral filesystem
+ * needs. An unrecognised value falls back to 'local' so a typo can
+ * never send writes somewhere that does not exist.
  *
  * @return string 'local' or 'remote'
  */
@@ -250,6 +253,16 @@ function isla_upload_url(string $filename): string
     $name = rawurlencode(basename($filename));
 
     $base = rtrim(trim(env('UPLOADS_URL_BASE', '')), '/');
+
+    // On the remote driver a bucket's own public URL (AWS_URL, shown
+    // on the bucket's settings page) is the natural fallback, so a
+    // host that injects the AWS_* variables does not ALSO have to set
+    // UPLOADS_URL_BASE by hand. UPLOADS_URL_BASE still wins when both
+    // are present, which is what lets a CDN sit in front of the bucket.
+    if ($base === '' && isla_uploads_driver() === 'remote') {
+        $base = rtrim(trim(env('AWS_URL', '')), '/');
+    }
+
     if ($base !== '') {
         return $base . '/' . $name;
     }
@@ -259,48 +272,84 @@ function isla_upload_url(string $filename): string
 
 /**
  * isla_upload_store_remote()
- * NOT IMPLEMENTED YET — deliberately.
+ * Stores a validated upload in S3-compatible object storage via
+ * include/s3.php (a signed SigV4 PUT). The key is the bare filename
+ * — the same string the database will hold — so the read side
+ * (isla_upload_url(), UPLOADS_URL_BASE) resolves it with no mapping
+ * table and no renaming on the way out.
  *
- * Storing to an S3-compatible bucket means signing the request with
- * AWS Signature Version 4. That is deterministic code, but it cannot
- * be exercised without a real bucket and real credentials, and the
- * failure mode of getting it subtly wrong is a 403 SignatureDoesNotMatch
- * at the moment a user tries to save their picture. Shipping it
- * unverified would trade a visible gap for an invisible one.
+ * A failure is never swallowed: the caller turns a FALSE into the
+ * "Could not save the file" message the uploader sees, and the log
+ * carries the HTTP status and the service's own error body, because
+ * the difference between a 403 (wrong credentials), a 404 (wrong
+ * bucket/endpoint) and a timeout is the whole diagnosis.
  *
- * It is therefore the ONE remaining piece of the object-storage
- * switch. The intended shape is a signed PUT of the file followed by
- * reads through UPLOADS_URL_BASE (already supported above), with
- * these variables: UPLOADS_DRIVER=remote, UPLOADS_URL_BASE,
- * S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_KEY, S3_SECRET.
- *
- * Until it exists this logs a precise reason and fails the upload, so
- * a misconfiguration is loud in the log and visible to the uploader —
- * never a silent claim that the picture was saved.
- *
- * @param string $tmpPath
- * @param string $filename
- * @return bool Always FALSE for now.
+ * @param string $tmpPath  PHP's temporary upload path.
+ * @param string $filename Bare filename to store it as.
+ * @return bool TRUE on success.
  */
 function isla_upload_store_remote(string $tmpPath, string $filename): bool
 {
-    error_log(
-        'islaFIND: UPLOADS_DRIVER=remote is set but the object-storage driver '
-        . 'is not implemented, so ' . $filename . ' was NOT stored. Use '
-        . 'UPLOADS_DRIVER=local, or finish include/uploads.php.'
-    );
+    require_once __DIR__ . '/s3.php';
 
-    return false;
+    $missing = isla_s3_missing_config();
+    if ($missing !== []) {
+        error_log(
+            'islaFIND: UPLOADS_DRIVER=remote but object storage is not configured; '
+            . 'missing ' . implode(', ', $missing) . ', so ' . $filename . ' was NOT stored.'
+        );
+        return false;
+    }
+
+    $bytes = @file_get_contents($tmpPath);
+    if ($bytes === false) {
+        error_log('islaFIND: could not read the temporary upload for ' . $filename . '.');
+        return false;
+    }
+
+    // Store the type the browser should render it as; a public bucket
+    // serves bytes back with the content type they were stored with,
+    // so an image/jpeg entry displays instead of downloading.
+    $ext  = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $type = $ext === 'png' ? 'image/png' : 'image/jpeg';
+
+    $result = isla_s3_put(basename($filename), $bytes, $type);
+    if (!$result['ok']) {
+        error_log(
+            'islaFIND: object-storage PUT for ' . $filename . ' failed (HTTP '
+            . $result['status'] . '): ' . $result['error'] . ' '
+            . substr($result['body'], 0, 300)
+        );
+        return false;
+    }
+
+    return true;
 }
 
 /**
  * isla_upload_delete_remote()
- * Counterpart of the above; logs and does nothing.
+ * Counterpart of the above: best-effort removal, matching the local
+ * path's promise that a file that is already gone is not an error.
+ * A missing configuration is silent (there is nothing to delete from),
+ * but a real failure is logged with its status.
  *
- * @param string $name
+ * @param string $name Bare stored filename.
  * @return void
  */
 function isla_upload_delete_remote(string $name): void
 {
-    error_log('islaFIND: cannot delete remote upload ' . $name . ' (driver not implemented).');
+    require_once __DIR__ . '/s3.php';
+
+    if (isla_s3_missing_config() !== []) {
+        return;
+    }
+
+    $result = isla_s3_delete(basename($name));
+    if (!$result['ok'] && $result['status'] !== 404) {
+        error_log(
+            'islaFIND: object-storage DELETE for ' . $name . ' failed (HTTP '
+            . $result['status'] . '): ' . $result['error'] . ' '
+            . substr($result['body'], 0, 300)
+        );
+    }
 }

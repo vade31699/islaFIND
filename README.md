@@ -326,6 +326,8 @@ panel's `admin_asset_url()`) · `head_meta.php` (shared
 loses its session on the next request — called from `db.php`, the one include
 with a connection) · `listing_visibility.php` (the one place that says which
 listings members may discover: the listing's own status *and* its owner's) ·
+`s3.php` (the S3-compatible client behind the upload seam: AWS Signature
+Version 4 signing and a signed PUT/DELETE, with no SDK dependency) ·
 `purge.php` (what "deleted" removes: the avatar, every listing's cover and
 album, the device history, the throttle row still holding the account's email,
 and finally the rows — one transaction, so a half-deleted account with live
@@ -356,20 +358,29 @@ the three smoke tests
 Three dependency-free smoke tests (no PHPUnit) run from the project root:
 
 ```bash
+php s3_sign_test.php                # SigV4 signing vs AWS's documented examples (no bucket needed)
 php dashboard_smoke_test.php        # links/assets resolve + the pages load over HTTP
 php render_smoke_test.php           # every page renders for a SIGNED-IN user, with warnings on
 php admin_flow_test.php             # reporting + moderation, end to end (NEEDS the database)
 
-composer test                       # runs all three
+composer test                       # runs all four
 ```
 
-The first two need no database (the pages redirect to login before touching it),
-so they pass on a machine with MySQL stopped. **`admin_flow_test.php` does need
+`s3_sign_test.php` and `dashboard_smoke_test.php` need no database (the pages
+redirect to login before touching it), so they pass on a machine with MySQL
+stopped. **`admin_flow_test.php` does need
 one** — it creates a throwaway admin, two members and a listing, then drives a
 real report through the real handlers into the real moderation queue.
 
 What they cover:
 
+- **`s3_sign_test.php`** — offline: the SigV4 signer is checked against four
+  of AWS's published example signatures (GET Object, PUT Object, GET Bucket
+  Lifecycle, Get Bucket List Objects), plus the UriEncode rules and the pair
+  of values — the request path and the canonical path — that must never
+  diverge. No bucket and no credentials are involved, which is the point:
+  the driver's failure mode is a 403 that otherwise only shows up the moment
+  a user saves a picture.
 - **`dashboard_smoke_test.php`** — static: every local link/asset on the
   dashboard exists, the shared head is used everywhere, the manifest parses,
   dev scripts are CLI-only, and `login.php` is wired to the throttle helpers
@@ -523,7 +534,8 @@ behaviour, so none of this touches local development:
 | -------- | ------- | ------ | ------------ |
 | `SESSION_DRIVER` | `files` | `mysql` | Keeps sessions in the `isla_sessions` table (created automatically) instead of PHP's files, so logins survive a deploy and are shared between instances. |
 | `SEND_SECURITY_HEADERS` | `0` | `1` | Sends the four hardening headers from PHP, for a host that ignores `.htaccess`. Leave `0` under Apache. |
-| `UPLOADS_URL_BASE` | empty | bucket/CDN origin | Makes every page render pictures from that origin. Read side only — see below. |
+| `UPLOADS_DRIVER` | `local` | `remote` | Stores uploads in S3-compatible object storage so they survive a deploy. |
+| `UPLOADS_URL_BASE` | empty | bucket/CDN origin | Makes every page render pictures from that origin. Falls back to `AWS_URL` when empty. |
 
 **Sessions — done.** `SESSION_DRIVER=mysql` swaps in the handler in
 `include/session_store.php`. It stores PHP's own serialised payload in a
@@ -537,17 +549,26 @@ fail-open: it is never the reason a visitor cannot get in.
 **Headers — done.** `SEND_SECURITY_HEADERS=1` sends exactly the same
 four headers `public/.htaccess` sets.
 
-**Uploads — the read side is done, the write side is not.** Every page
-builds picture URLs through `isla_upload_url()` (`include/uploads.php`),
-so setting `UPLOADS_URL_BASE` moves reads to a bucket or CDN with no code
-change. Writing to object storage is the one piece still outstanding: it
-needs an S3 Signature Version 4 PUT, and that cannot be written honestly
-without a bucket and credentials to test against — its failure mode is a
-`403 SignatureDoesNotMatch` at the moment a user saves their picture.
-Until it is built, `UPLOADS_DRIVER=remote` fails the upload **loudly**
-and logs exactly what is missing, rather than reporting success. On a
-host with a persistent disk, uploads work unchanged and none of this
-applies.
+**Uploads — done, both halves.** Set `UPLOADS_DRIVER=remote` and pictures
+are stored in S3-compatible object storage instead of `public/uploads/`,
+so they survive a host that wipes its filesystem on every deploy. Every
+page already builds picture URLs through `isla_upload_url()`
+(`include/uploads.php`), so reads follow `UPLOADS_URL_BASE` (falling back
+to `AWS_URL` when it is empty) with no code change. The write side is the
+signed SigV4 PUT in `include/s3.php` — no SDK, no extra dependency. On
+Laravel Cloud, attaching a bucket as the environment's default disk
+injects `AWS_BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`,
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` automatically; add
+`AWS_URL` (shown on the bucket's settings page) by hand for a **public**
+bucket. On a host with a persistent disk, leave `UPLOADS_DRIVER=local`
+and none of this applies.
+
+The signing code is verified without a bucket: `s3_sign_test.php`
+reproduces four of AWS's own published example signatures (GET, PUT and
+two bucket GETs), so the canonical request and signing-key derivation are
+checked against the specification, not against a live endpoint. What that
+does not cover is the network round trip and any provider quirk (R2 signs
+with the region `auto`), so exercise one real upload after switching.
 
 ---
 
