@@ -14,9 +14,11 @@
 // filesystem: public/uploads/ is wiped on each release, so a picture
 // written to disk vanishes while its row still names it — every card
 // then shows a broken image. Such a host keeps the pictures in object
-// storage instead. BOTH halves of that are here now: UPLOADS_URL_BASE
-// moves reads to the bucket, and UPLOADS_DRIVER=remote moves writes
-// there through include/s3.php (AWS Signature Version 4).
+// storage instead. BOTH halves of that are here now: UPLOADS_DRIVER=remote
+// moves writes there through include/s3.php (AWS Signature Version 4),
+// and reads follow UPLOADS_URL_BASE / AWS_URL when a public origin is
+// configured — or go through public/image.php, which signs a read with
+// those same credentials, when it is not.
 // ============================================================
 
 require_once __DIR__ . '/env.php';
@@ -233,6 +235,33 @@ function isla_upload_name(string $prefix, int $id, string $ext): string
 }
 
 /**
+ * isla_upload_servable_name()
+ * TRUE when $name is a stored picture's bare filename. This is the
+ * gate public/image.php runs BEFORE it signs anything, so it is
+ * written as a whitelist rather than a blacklist: a name that starts
+ * with anything but a letter or a digit, that contains a path
+ * separator, or that does not end in a picture extension is refused.
+ *
+ * That is what stops '?f=../.env' (or any other key in the bucket)
+ * from ever becoming the object of a signed read, and it costs
+ * nothing, because every name this app writes comes from
+ * isla_upload_name() and matches by construction.
+ *
+ * The length cap is generous next to what isla_upload_name() builds
+ * (about 40 characters) and exists so an absurdly long key cannot be
+ * used to make the app sign something expensive.
+ *
+ * @param string $name Raw value of the ?f= query parameter.
+ * @return bool
+ */
+function isla_upload_servable_name(string $name): bool
+{
+    return strlen($name) <= 200
+        && basename($name) === $name
+        && preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*\.(jpe?g|png|gif|webp)$/i', $name) === 1;
+}
+
+/**
  * isla_listing_photo_src()
  * The picture a listing card should show, as a URL — or NULL when
  * there is none at all.
@@ -291,13 +320,27 @@ function isla_upload_delete(string $filename): void
  * isla_upload_url()
  * The URL a page should put in <img src="...">.
  *
- * With no UPLOADS_URL_BASE set it returns the app-relative path the
- * pages have always used ('uploads/<name>'), because the file really
- * is sitting in the web root. When pictures are served from a bucket
- * or CDN instead, set UPLOADS_URL_BASE to that origin and every page
- * picks it up without a code change.
+ * There are three cases, in order of preference:
  *
- * The filename is rawurlencode()d on both paths: uploaded names are
+ *   1. A public origin is configured (UPLOADS_URL_BASE, or AWS_URL on
+ *      the remote driver): the browser fetches the object directly
+ *      from the bucket or CDN. Cheapest — no PHP hop, cacheable at
+ *      the edge.
+ *   2. The remote driver with no public origin: the browser fetches
+ *      'image.php?f=<name>', and public/image.php signs a read of the
+ *      object server-side. Same bytes, one hop through the app.
+ *   3. The local driver: the app-relative path the pages have always
+ *      used ('uploads/<name>'), because the file really is sitting in
+ *      the web root.
+ *
+ * Case 2 is why a missing AWS_URL is no longer a deployment that
+ * cannot show a picture. It used to be: nothing served the URL the
+ * pages built, so the store was refused and the banner told the
+ * operator to add a variable that Laravel Cloud shows nowhere in its
+ * bucket UI. Signing the read removes that dependency entirely — a
+ * public URL is now an optimisation, not a requirement.
+ *
+ * The filename is rawurlencode()d on every path: uploaded names are
  * random hex today, but encoding is what keeps a name with a space or
  * an ampersand from breaking the URL if that ever stops being true.
  *
@@ -313,6 +356,12 @@ function isla_upload_url(string $filename): string
         return $base . '/' . $name;
     }
 
+    // Remote storage and no public origin: serve through the app, so
+    // the picture is readable with the credentials already in hand.
+    if (isla_uploads_driver() === 'remote') {
+        return 'image.php?f=' . $name;
+    }
+
     return 'uploads/' . $name;
 }
 
@@ -323,18 +372,25 @@ function isla_upload_url(string $filename): string
  *
  * UPLOADS_URL_BASE is the explicit switch and wins whenever it is
  * set (that is what lets a CDN sit in front of the bucket). On the
- * remote driver a bucket's own public URL (AWS_URL, shown on the
- * bucket's settings page) is the natural fallback, so a host that
- * injects the AWS_* variables does not ALSO have to set
- * UPLOADS_URL_BASE by hand. With the local driver an empty result is
- * CORRECT and expected: the file really is at 'uploads/<name>' in the
- * web root, which is what isla_upload_url() falls back to.
+ * remote driver a bucket's own public URL (AWS_URL) is the natural
+ * fallback, so a host that injects the AWS_* variables does not ALSO
+ * have to set UPLOADS_URL_BASE by hand. With the local driver an
+ * empty result is CORRECT and expected: the file really is at
+ * 'uploads/<name>' in the web root, which is what isla_upload_url()
+ * falls back to.
  *
- * The remote driver is the one case where empty is fatal, and that is
- * why isla_upload_store_remote() asks this function before it stores
- * anything: bytes written to a bucket nobody can read are the broken
- * image, and a broken image behind a "Profile picture updated" banner
- * is exactly the failure this helper makes impossible.
+ * An empty result is NOT fatal on the remote driver either — and that
+ * is the point of this helper now being advisory. It used to be the
+ * gate isla_upload_store_remote() consulted before storing anything,
+ * because bytes in a bucket nobody can read are a broken image behind
+ * a "Profile picture updated" banner. That reasoning still holds; what
+ * changed is that reads no longer depend on a public origin. With
+ * none configured, isla_upload_url() returns the public/image.php URL
+ * and that script signs the read. So empty now means "no fast path",
+ * not "no picture" — which matters because Laravel Cloud injects
+ * every other AWS_* variable and shows AWS_URL nowhere in its bucket
+ * UI, so a deployment could otherwise store pictures correctly and
+ * still fail to display one.
  *
  * @return string Base URL, or '' when there is none.
  */
@@ -384,27 +440,14 @@ function isla_upload_store_remote(string $tmpPath, string $filename): bool
         return false;
     }
 
-    // The bytes COULD be stored without a public URL — and that is the
-    // trap: the upload would "succeed", the row would be written, the
-    // banner would say "Profile picture updated", and every card would
-    // show a broken image, because nothing serves the URL the pages
-    // build. On the remote driver there is no web root for
-    // 'uploads/<name>' to resolve to, so an empty base means the file
-    // can never be seen. Refusing here, with the reason, is the honest
-    // answer — and it costs nothing, because the owner would have had
-    // to re-upload once the URL is set anyway.
-    if (isla_upload_public_base() === '') {
-        isla_upload_set_error(
-            'Uploads are stored in object storage, but no public URL is set for it, '
-            . "so pictures cannot be displayed. Add AWS_URL (the bucket's public base "
-            . 'URL) or UPLOADS_URL_BASE to the environment and redeploy.'
-        );
-        error_log(
-            'islaFIND: UPLOADS_DRIVER=remote but neither UPLOADS_URL_BASE nor AWS_URL is set, '
-            . 'so ' . $filename . ' was NOT stored (its URL could never be served).'
-        );
-        return false;
-    }
+    // An empty public base used to refuse the store, and that was the
+    // right call while nothing served the URL the pages built: the
+    // upload would "succeed", the row would be written, and every
+    // card would show a broken image. It is no longer true. With no
+    // public URL, isla_upload_url() points at public/image.php, which
+    // signs a read of the object with the same credentials this
+    // function is already using — so the bytes ARE displayable, and
+    // refusing them would be the only thing breaking the picture.
 
     $bytes = @file_get_contents($tmpPath);
     if ($bytes === false) {

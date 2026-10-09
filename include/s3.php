@@ -406,6 +406,29 @@ function isla_s3_put(string $key, string $body, string $contentType = 'applicati
 }
 
 /**
+ * isla_s3_get()
+ * Reads an object's bytes. It goes through the SAME signed request
+ * as the writes above — only the verb changes — so the read path
+ * inherits the SigV4 implementation the tests already pin to AWS's
+ * published examples (the GET Object case among them), rather than
+ * introducing a second, unverified signer.
+ *
+ * It exists for public/image.php. A bucket with no public URL of its
+ * own cannot be read by a browser, but it can be read by whoever
+ * holds the credentials, and the app does. That signed read is what
+ * lets an upload be stored and displayed even when AWS_URL was never
+ * set — the variable is a fast path (and a CDN's cache), not a
+ * requirement.
+ *
+ * @param string $key Object key (bare filename here).
+ * @return array{ok:bool,status:int,error:string,body:string}
+ */
+function isla_s3_get(string $key): array
+{
+    return isla_s3_send('GET', $key, '', '');
+}
+
+/**
  * isla_s3_delete()
  * Removes $key. A key that is already gone answers 204 on most
  * S3-compatible services (it is not an error), so callers only

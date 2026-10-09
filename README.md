@@ -355,15 +355,16 @@ the three smoke tests
 
 ## Testing
 
-Three dependency-free smoke tests (no PHPUnit) run from the project root:
+The dependency-free smoke tests (no PHPUnit) run from the project root:
 
 ```bash
 php s3_sign_test.php                # SigV4 signing vs AWS's documented examples (no bucket needed)
+php uploads_url_test.php            # which URL a picture gets + the image.php name whitelist (no bucket)
 php dashboard_smoke_test.php        # links/assets resolve + the pages load over HTTP
 php render_smoke_test.php           # every page renders for a SIGNED-IN user, with warnings on
 php admin_flow_test.php             # reporting + moderation, end to end (NEEDS the database)
 
-composer test                       # runs all four
+composer test                       # runs them all
 ```
 
 `s3_sign_test.php` and `dashboard_smoke_test.php` need no database (the pages
@@ -381,6 +382,14 @@ What they cover:
   diverge. No bucket and no credentials are involved, which is the point:
   the driver's failure mode is a 403 that otherwise only shows up the moment
   a user saves a picture.
+- **`uploads_url_test.php`** — offline: which URL a stored picture gets under
+  each driver and base combination (public origin, signed read through
+  `public/image.php`, local file), that the fallback stays relative so the
+  admin panel's `../` prefix keeps working, and that the filename whitelist in
+  front of the signed read accepts every name the app writes while refusing
+  traversal, other extensions and over-long keys. It also runs
+  `public/image.php` as its own process and asserts the status code it answers
+  for a bad name, a missing `?f=`, the wrong driver and a valid name.
 - **`dashboard_smoke_test.php`** — static: every local link/asset on the
   dashboard exists, the shared head is used everywhere, the manifest parses,
   dev scripts are CLI-only, and `login.php` is wired to the throttle helpers
@@ -535,7 +544,7 @@ behaviour, so none of this touches local development:
 | `SESSION_DRIVER` | `files` | `mysql` | Keeps sessions in the `isla_sessions` table (created automatically) instead of PHP's files, so logins survive a deploy and are shared between instances. |
 | `SEND_SECURITY_HEADERS` | `0` | `1` | Sends the four hardening headers from PHP, for a host that ignores `.htaccess`. Leave `0` under Apache. |
 | `UPLOADS_DRIVER` | `local` | `remote` | Stores uploads in S3-compatible object storage so they survive a deploy. |
-| `UPLOADS_URL_BASE` | empty | bucket/CDN origin | Makes every page render pictures from that origin. Falls back to `AWS_URL` when empty. |
+| `UPLOADS_URL_BASE` | empty | bucket/CDN origin | Makes every page render pictures from that origin. Falls back to `AWS_URL`, then to the signed read in `public/image.php`, when empty. |
 
 **Sessions — done.** `SESSION_DRIVER=mysql` swaps in the handler in
 `include/session_store.php`. It stores PHP's own serialised payload in a
@@ -554,40 +563,48 @@ are stored in S3-compatible object storage instead of `public/uploads/`,
 so they survive a host that wipes its filesystem on every deploy. Every
 page already builds picture URLs through `isla_upload_url()`
 (`include/uploads.php`), so reads follow `UPLOADS_URL_BASE` (falling back
-to `AWS_URL` when it is empty) with no code change. The write side is the
-signed SigV4 PUT in `include/s3.php` — no SDK, no extra dependency. On
-Laravel Cloud, attaching a bucket as the environment's default disk
-injects `AWS_BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`,
-`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` automatically; add
-`AWS_URL` (shown on the bucket's settings page) by hand for a **public**
-bucket. On a host with a persistent disk, leave `UPLOADS_DRIVER=local`
-and none of this applies.
+to `AWS_URL`, then to the signed read in `public/image.php`) with no code
+change. The write side is the signed SigV4 PUT in `include/s3.php` — no
+SDK, no extra dependency — and the read side reuses that same signer over
+GET. On Laravel Cloud, attaching a bucket as the environment's default
+disk injects `AWS_BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`,
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` automatically, and that is
+all a deployment needs. On a host with a persistent disk, leave
+`UPLOADS_DRIVER=local` and none of this applies.
 
-> **Laravel Cloud is the ephemeral case, and it needs BOTH variables.**
+> **Laravel Cloud is the ephemeral case, and it needs ONE variable.**
 The app's container disk is replaced at any time, so `UPLOADS_DRIVER=local`
 (the default) writes pictures to a filesystem that will not be there next
 request: the upload reports success, the row is saved, and every card
 shows a broken image. Attaching a bucket is not enough on its own —
 `Laravel Cloud` injects the five `AWS_*` connection variables, but it does
-**not** inject the switch or the read URL. Set **both** as custom
-environment variables and redeploy:
+**not** inject this switch. Set it as a custom environment variable and
+redeploy:
 >
 > | Variable | Value |
 > | -------- | ----- |
 > | `UPLOADS_DRIVER` | `remote` |
-> | `AWS_URL` | the bucket's public base URL, from its settings page (the bucket must be **public**; a private bucket has no such URL) |
+> | `AWS_URL` / `UPLOADS_URL_BASE` | optional — the bucket's public base URL, if it has one |
 >
-> The app now makes a missing `AWS_URL` impossible to miss: with
-`UPLOADS_DRIVER=remote` and neither `UPLOADS_URL_BASE` nor `AWS_URL` set,
-`isla_upload_store_remote()` refuses the store and the banner names the
-missing variable, because a picture stored behind a URL nothing serves is
-the exact broken-image failure this path exists to prevent.
+> The read URL is optional on purpose. `AWS_URL` is not injected, and
+Laravel Cloud does not surface it anywhere in its bucket UI, so making the
+app depend on it would mean a deployment that stores pictures correctly
+and still cannot show one — the exact broken-image failure this path
+exists to prevent. Instead, `isla_upload_url()` points at
+`public/image.php` when no public origin is configured, and that script
+signs a read of the object with the same credentials that stored it and
+streams the bytes back. Setting a public origin is still worthwhile (it
+skips the PHP hop and lets a CDN cache the pictures), it is just no
+longer required.
 
 The signing code is verified without a bucket: `s3_sign_test.php`
 reproduces four of AWS's own published example signatures (GET, PUT and
-two bucket GETs), so the canonical request and signing-key derivation are
-checked against the specification, not against a live endpoint. What that
-does not cover is the network round trip and any provider quirk (R2 signs
+two bucket GETs) — including the GET Object case the reader uses — so the
+canonical request and signing-key derivation are checked against the
+specification, not against a live endpoint. `uploads_url_test.php` covers
+the read side's own logic: which URL each driver and base combination
+produces, and which filenames `public/image.php` will agree to sign. What
+neither covers is the network round trip and any provider quirk (R2 signs
 with the region `auto`), so exercise one real upload after switching.
 
 ---
