@@ -77,11 +77,67 @@ function isla_uploads_dir(): string
  */
 function isla_upload_store(string $tmpPath, string $filename): bool
 {
+    // Every failure below records WHY through isla_upload_set_error(),
+    // so the page that shows the uploader the banner can say what is
+    // actually wrong ("no public URL is set") instead of the one-size
+    // "Could not save the file" that hides a misconfigured deployment.
+    isla_upload_set_error('');
+
     if (isla_uploads_driver() === 'remote') {
         return isla_upload_store_remote($tmpPath, $filename);
     }
 
     return move_uploaded_file($tmpPath, isla_uploads_dir() . '/' . $filename);
+}
+
+/**
+ * isla_upload_error() / isla_upload_set_error()
+ * Why the LAST isla_upload_store() returned FALSE, or '' when it
+ * succeeded. Callers read it only after a failure, so a store that
+ * works never has to clear anything and a plain local-disk failure
+ * keeps the generic message.
+ *
+ * It lives in a superglobal rather than in the return value because
+ * the seam's signature (bool) is what every call site already is: a
+ * remote-storage misconfiguration must not force a new shape on the
+ * account avatar, the listing photos and the report screenshot.
+ *
+ * @return string Human-readable reason, ready to show a user.
+ */
+function isla_upload_error(): string
+{
+    return (string) ($GLOBALS['isla_upload_error'] ?? '');
+}
+
+/**
+ * isla_upload_set_error()
+ * Records the reason for the current failed store. Internal to this
+ * file — the handlers only ever read isla_upload_error().
+ *
+ * @param string $message
+ * @return void
+ */
+function isla_upload_set_error(string $message): void
+{
+    $GLOBALS['isla_upload_error'] = $message;
+}
+
+/**
+ * isla_upload_failed_message()
+ * The banner text for a store that just failed: the recorded reason
+ * when there is one, otherwise the caller's own fallback. Written as
+ * one helper so the four upload call sites never have to repeat the
+ * "specific reason or generic message" choice — and so a new one can
+ * only get it right by using this.
+ *
+ * @param string $fallback Message for a failure with no recorded cause.
+ * @return string
+ */
+function isla_upload_failed_message(string $fallback): string
+{
+    $why = isla_upload_error();
+
+    return $why !== '' ? $why : $fallback;
 }
 
 /**
@@ -251,23 +307,46 @@ function isla_upload_delete(string $filename): void
 function isla_upload_url(string $filename): string
 {
     $name = rawurlencode(basename($filename));
-
-    $base = rtrim(trim(env('UPLOADS_URL_BASE', '')), '/');
-
-    // On the remote driver a bucket's own public URL (AWS_URL, shown
-    // on the bucket's settings page) is the natural fallback, so a
-    // host that injects the AWS_* variables does not ALSO have to set
-    // UPLOADS_URL_BASE by hand. UPLOADS_URL_BASE still wins when both
-    // are present, which is what lets a CDN sit in front of the bucket.
-    if ($base === '' && isla_uploads_driver() === 'remote') {
-        $base = rtrim(trim(env('AWS_URL', '')), '/');
-    }
+    $base = isla_upload_public_base();
 
     if ($base !== '') {
         return $base . '/' . $name;
     }
 
     return 'uploads/' . $name;
+}
+
+/**
+ * isla_upload_public_base()
+ * The origin a stored file is fetched from, without a trailing slash
+ * — or '' when the file has no public URL at all.
+ *
+ * UPLOADS_URL_BASE is the explicit switch and wins whenever it is
+ * set (that is what lets a CDN sit in front of the bucket). On the
+ * remote driver a bucket's own public URL (AWS_URL, shown on the
+ * bucket's settings page) is the natural fallback, so a host that
+ * injects the AWS_* variables does not ALSO have to set
+ * UPLOADS_URL_BASE by hand. With the local driver an empty result is
+ * CORRECT and expected: the file really is at 'uploads/<name>' in the
+ * web root, which is what isla_upload_url() falls back to.
+ *
+ * The remote driver is the one case where empty is fatal, and that is
+ * why isla_upload_store_remote() asks this function before it stores
+ * anything: bytes written to a bucket nobody can read are the broken
+ * image, and a broken image behind a "Profile picture updated" banner
+ * is exactly the failure this helper makes impossible.
+ *
+ * @return string Base URL, or '' when there is none.
+ */
+function isla_upload_public_base(): string
+{
+    $base = rtrim(trim(env('UPLOADS_URL_BASE', '')), '/');
+
+    if ($base === '' && isla_uploads_driver() === 'remote') {
+        $base = rtrim(trim(env('AWS_URL', '')), '/');
+    }
+
+    return $base;
 }
 
 /**
@@ -294,6 +373,10 @@ function isla_upload_store_remote(string $tmpPath, string $filename): bool
 
     $missing = isla_s3_missing_config();
     if ($missing !== []) {
+        isla_upload_set_error(
+            'Uploads are set to object storage but its connection details are missing ('
+            . implode(', ', $missing) . '). Add them to the environment and redeploy.'
+        );
         error_log(
             'islaFIND: UPLOADS_DRIVER=remote but object storage is not configured; '
             . 'missing ' . implode(', ', $missing) . ', so ' . $filename . ' was NOT stored.'
@@ -301,8 +384,31 @@ function isla_upload_store_remote(string $tmpPath, string $filename): bool
         return false;
     }
 
+    // The bytes COULD be stored without a public URL — and that is the
+    // trap: the upload would "succeed", the row would be written, the
+    // banner would say "Profile picture updated", and every card would
+    // show a broken image, because nothing serves the URL the pages
+    // build. On the remote driver there is no web root for
+    // 'uploads/<name>' to resolve to, so an empty base means the file
+    // can never be seen. Refusing here, with the reason, is the honest
+    // answer — and it costs nothing, because the owner would have had
+    // to re-upload once the URL is set anyway.
+    if (isla_upload_public_base() === '') {
+        isla_upload_set_error(
+            'Uploads are stored in object storage, but no public URL is set for it, '
+            . "so pictures cannot be displayed. Add AWS_URL (the bucket's public base "
+            . 'URL) or UPLOADS_URL_BASE to the environment and redeploy.'
+        );
+        error_log(
+            'islaFIND: UPLOADS_DRIVER=remote but neither UPLOADS_URL_BASE nor AWS_URL is set, '
+            . 'so ' . $filename . ' was NOT stored (its URL could never be served).'
+        );
+        return false;
+    }
+
     $bytes = @file_get_contents($tmpPath);
     if ($bytes === false) {
+        isla_upload_set_error('The uploaded file could not be read. Please try again.');
         error_log('islaFIND: could not read the temporary upload for ' . $filename . '.');
         return false;
     }
@@ -315,6 +421,7 @@ function isla_upload_store_remote(string $tmpPath, string $filename): bool
 
     $result = isla_s3_put(basename($filename), $bytes, $type);
     if (!$result['ok']) {
+        isla_upload_set_error('The picture could not be saved to object storage. Please try again.');
         error_log(
             'islaFIND: object-storage PUT for ' . $filename . ' failed (HTTP '
             . $result['status'] . '): ' . $result['error'] . ' '

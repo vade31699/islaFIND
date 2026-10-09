@@ -211,7 +211,14 @@ if (isset($_FILES['evidence']) && (string) ($_FILES['evidence']['name'] ?? '') !
 
     if (!isla_upload_store($_FILES['evidence']['tmp_name'], $evidenceName)) {
         // The name is generated, so nothing half-written is left behind.
-        report_back('error', 'Your screenshot could not be saved. Please try again, or send the report without it.', $returnTo);
+        // The seam's own reason is preferred when it has one, so a
+        // storage misconfiguration is not reported to the reporter as a
+        // transient glitch they should just retry.
+        report_back(
+            'error',
+            isla_upload_failed_message('Your screenshot could not be saved. Please try again, or send the report without it.'),
+            $returnTo
+        );
     }
 }
 

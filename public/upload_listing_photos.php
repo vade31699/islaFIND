@@ -222,7 +222,10 @@ if ($action === 'album_add') {
 
         if (!isla_upload_store($upload['tmp_name'], $filename)) {
             if ($firstError === '') {
-                $firstError = 'Could not save the file. Check the uploads folder permissions.';
+                // The seam's own reason when it has one (a storage
+                // misconfiguration says exactly what to fix), and the
+                // permissions line only as the local-disk fallback.
+                $firstError = isla_upload_failed_message('Could not save the file. Check the uploads folder permissions.');
             }
             continue;
         }
@@ -296,7 +299,7 @@ if (!$check['ok']) {
 $filename = isla_upload_name('listing', (int) $listing['id'], $check['ext']);
 
 if (!isla_upload_store($file['tmp_name'], $filename)) {
-    listingPhotosFlash('error', 'Could not save the file. Check the uploads folder permissions.');
+    listingPhotosFlash('error', isla_upload_failed_message('Could not save the file. Check the uploads folder permissions.'));
 }
 
 // The previous cover is removed only once the new file is safely in

@@ -89,8 +89,12 @@ if (!$check['ok']) {
 $filename = isla_upload_name('user', (int) $user['user_id'], $check['ext']);
 // Hand the bytes to the storage seam — the local uploads folder
 // unless the app is configured for a remote driver.
+// A failure here carries its own reason when the storage seam knows
+// it (object storage misconfigured, for instance); the generic line is
+// only the fallback, so a deployment problem is never reported as a
+// permissions problem on the wrong folder.
 if (!isla_upload_store($file['tmp_name'], $filename)) {
-    flashRedirect('error', 'Could not save the file. Check the uploads folder permissions.');
+    flashRedirect('error', isla_upload_failed_message('Could not save the file. Check the uploads folder permissions.'));
 }
 
 // --- 10. Automatic old picture deletion -------------------------

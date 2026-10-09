@@ -563,6 +563,26 @@ injects `AWS_BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`,
 bucket. On a host with a persistent disk, leave `UPLOADS_DRIVER=local`
 and none of this applies.
 
+> **Laravel Cloud is the ephemeral case, and it needs BOTH variables.**
+The app's container disk is replaced at any time, so `UPLOADS_DRIVER=local`
+(the default) writes pictures to a filesystem that will not be there next
+request: the upload reports success, the row is saved, and every card
+shows a broken image. Attaching a bucket is not enough on its own —
+`Laravel Cloud` injects the five `AWS_*` connection variables, but it does
+**not** inject the switch or the read URL. Set **both** as custom
+environment variables and redeploy:
+>
+> | Variable | Value |
+> | -------- | ----- |
+> | `UPLOADS_DRIVER` | `remote` |
+> | `AWS_URL` | the bucket's public base URL, from its settings page (the bucket must be **public**; a private bucket has no such URL) |
+>
+> The app now makes a missing `AWS_URL` impossible to miss: with
+`UPLOADS_DRIVER=remote` and neither `UPLOADS_URL_BASE` nor `AWS_URL` set,
+`isla_upload_store_remote()` refuses the store and the banner names the
+missing variable, because a picture stored behind a URL nothing serves is
+the exact broken-image failure this path exists to prevent.
+
 The signing code is verified without a bucket: `s3_sign_test.php`
 reproduces four of AWS's own published example signatures (GET, PUT and
 two bucket GETs), so the canonical request and signing-key derivation are
