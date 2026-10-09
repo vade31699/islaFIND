@@ -544,7 +544,7 @@ behaviour, so none of this touches local development:
 | `SESSION_DRIVER` | `files` | `mysql` | Keeps sessions in the `isla_sessions` table (created automatically) instead of PHP's files, so logins survive a deploy and are shared between instances. |
 | `SEND_SECURITY_HEADERS` | `0` | `1` | Sends the four hardening headers from PHP, for a host that ignores `.htaccess`. Leave `0` under Apache. |
 | `UPLOADS_DRIVER` | `local` | `remote` | Stores uploads in S3-compatible object storage so they survive a deploy. |
-| `UPLOADS_URL_BASE` | empty | bucket/CDN origin | Makes every page render pictures from that origin. Falls back to `AWS_URL`, then to the signed read in `public/image.php`, when empty. |
+| `UPLOADS_URL_BASE` | empty | bucket/CDN origin | Makes every page render pictures from that origin. When empty, reads go through the signed read in `public/image.php`. This is the only switch that enables the direct fast path — `AWS_URL` is ignored on purpose. |
 
 **Sessions — done.** `SESSION_DRIVER=mysql` swaps in the handler in
 `include/session_store.php`. It stores PHP's own serialised payload in a
@@ -562,9 +562,14 @@ four headers `public/.htaccess` sets.
 are stored in S3-compatible object storage instead of `public/uploads/`,
 so they survive a host that wipes its filesystem on every deploy. Every
 page already builds picture URLs through `isla_upload_url()`
-(`include/uploads.php`), so reads follow `UPLOADS_URL_BASE` (falling back
-to `AWS_URL`, then to the signed read in `public/image.php`) with no code
-change. The write side is the signed SigV4 PUT in `include/s3.php` — no
+(`include/uploads.php`), so reads follow `UPLOADS_URL_BASE` when one is set
+and otherwise go through the signed read in `public/image.php`, with no
+code change. `AWS_URL` is **not** consulted as an origin: it is the
+platform's variable for its own bucket binding, and a deployment whose
+`AWS_URL` pointed at a bucket custom domain that did not resolve showed a
+broken image for **every** photo while `public/image.php` served those same
+bytes — a wrong guess here is not a slow picture, it is no picture, on
+every page. The write side is the signed SigV4 PUT in `include/s3.php` — no
 SDK, no extra dependency — and the read side reuses that same signer over
 GET. On Laravel Cloud, attaching a bucket as the environment's default
 disk injects `AWS_BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`,
@@ -584,16 +589,13 @@ redeploy:
 > | Variable | Value |
 > | -------- | ----- |
 > | `UPLOADS_DRIVER` | `remote` |
-> | `AWS_URL` / `UPLOADS_URL_BASE` | optional — the bucket's public base URL, if it has one |
+> | `UPLOADS_URL_BASE` | optional — the bucket's public base URL, if it has one |
 >
-> The read URL is optional on purpose. `AWS_URL` is not injected, and
-Laravel Cloud does not surface it anywhere in its bucket UI, so making the
-app depend on it would mean a deployment that stores pictures correctly
-and still cannot show one — the exact broken-image failure this path
-exists to prevent. Instead, `isla_upload_url()` points at
-`public/image.php` when no public origin is configured, and that script
-signs a read of the object with the same credentials that stored it and
-streams the bytes back. Setting a public origin is still worthwhile (it
+> The read URL is optional on purpose: `isla_upload_url()` points at
+> `public/image.php` when no public origin is configured, and that script
+> signs a read of the object with the same credentials that stored it and
+> streams the bytes back, so a deployment that stores pictures correctly
+> can always show one. Setting a public origin is still worthwhile (it
 skips the PHP hop and lets a CDN cache the pictures), it is just no
 longer required.
 

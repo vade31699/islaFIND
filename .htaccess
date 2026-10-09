@@ -26,10 +26,27 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    # Deliberately unconditional. Every file that should be servable
-    # now lives under public/, so letting an existing root-level file
-    # pass through would hand out README.md, final_app.sql and the
-    # composer files.
+    # Apache applies a .htaccess to every vhost whose directory
+    # contains it — including islafind.test, whose DocumentRoot is
+    # ALREADY public/. There the URLs are resolved against public/
+    # already, so forwarding them a second time would look for
+    # public/public/<file>. A document root that ends in public is
+    # therefore left completely alone.
+    RewriteCond %{DOCUMENT_ROOT} !public$ [NC]
+
+    # A request that has ALREADY been forwarded has /public/ in its
+    # URI and must not be forwarded again. Without this the rule
+    # rewrites public/style.css into public/public/style.css on its
+    # second pass, and Apache gives up after 10 internal redirects
+    # ("Request exceeded the limit of 10 internal redirects") — a 500
+    # on every page of the site.
+    RewriteCond %{REQUEST_URI} !/public/
+
+    # Still deliberately unconditional in the OTHER direction: a
+    # request for a root-level file (README.md, final_app.sql, the
+    # composer files, include/db.php …) is forwarded into public/ too,
+    # where that file does not exist. Letting an existing root-level
+    # file pass through would hand it out.
     RewriteRule ^(.*)$ public/$1 [L]
 </IfModule>
 

@@ -5,11 +5,11 @@
 //
 // WHY THIS FILE EXISTS
 // Uploaded pictures live in object storage, and the browser normally
-// fetches them straight from the bucket's public origin (UPLOADS_URL_BASE
-// or AWS_URL — see include/uploads.php). But Laravel Cloud neither
-// injects that variable nor shows it anywhere in its bucket UI, so a
-// deployment could hold perfectly good uploads that no page could
-// display. This script closes that gap: it takes ?f=<stored filename>,
+// fetches them straight from a public origin the operator names in
+// UPLOADS_URL_BASE (see include/uploads.php). That variable is optional
+// and is not injected by anything, so a deployment could hold perfectly
+// good uploads that no page could display. This script closes that gap:
+// it takes ?f=<stored filename>,
 // signs a read of that one object with the credentials the app already
 // has (include/s3.php — the same SigV4 code that stored the file), and
 // streams the bytes back.
@@ -21,11 +21,14 @@
 //
 // WHAT IT COSTS
 // One PHP request per picture, where a public URL would cost none.
-// isla_upload_url() therefore prefers the public URL whenever one is
-// configured, and only falls back to this file otherwise. The bytes
-// are cached at the browser afterwards (the names are random and never
-// reused, so what sits behind a URL never changes), which keeps the
-// fallback honest even on a listing page full of photos.
+// isla_upload_url() therefore prefers the public URL when the operator
+// has configured one, and uses this file otherwise — including when the
+// platform's own AWS_URL is set, which this app deliberately does not
+// treat as an origin (pointing the app at an origin that does not
+// resolve is a broken image on every page). The bytes are cached at the
+// browser afterwards (the names are random and never reused, so what
+// sits behind a URL never changes), which keeps this path honest even on
+// a listing page full of photos.
 // ============================================================
 
 require_once __DIR__ . '/../include/uploads.php';

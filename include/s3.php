@@ -30,15 +30,19 @@
 //   AWS_ACCESS_KEY_ID      access key id
 //   AWS_SECRET_ACCESS_KEY  secret access key
 //   S3_PATH_STYLE          '1' (default) path-style, '0' virtual-hosted
-//   AWS_URL                public base URL of a PUBLIC bucket
+//
+// AWS_URL is NOT read here, and not by uploads.php either: it belongs to
+// the platform's own bucket binding, not to this app's read path. Only
+// UPLOADS_URL_BASE (uploads.php) names an origin this app will trust.
 //
 // Laravel Cloud injects AWS_BUCKET / AWS_ENDPOINT_URL / AWS_REGION /
 // AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY automatically once a
-// bucket is attached as the environment's default disk. AWS_URL is
-// shown on the bucket's settings page and must be added by hand as
-// a custom variable. UPLOADS_URL_BASE (see uploads.php) is honoured
-// first when set, so putting a CDN in front of the bucket is a
-// one-line change.
+// bucket is attached as the environment's default disk. It also sets
+// AWS_URL for its own binding — which this app deliberately ignores as
+// a read origin (see uploads.php): a value that does not resolve would
+// otherwise break every picture on the site. UPLOADS_URL_BASE is the
+// app's own switch, and setting it to a CDN origin is a one-line
+// change.
 // ============================================================
 
 require_once __DIR__ . '/env.php';

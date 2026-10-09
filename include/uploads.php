@@ -16,9 +16,17 @@
 // then shows a broken image. Such a host keeps the pictures in object
 // storage instead. BOTH halves of that are here now: UPLOADS_DRIVER=remote
 // moves writes there through include/s3.php (AWS Signature Version 4),
-// and reads follow UPLOADS_URL_BASE / AWS_URL when a public origin is
-// configured — or go through public/image.php, which signs a read with
-// those same credentials, when it is not.
+// and reads follow UPLOADS_URL_BASE when the operator configures a public
+// origin — or go through public/image.php, which signs a read with those
+// same credentials, when there is none.
+//
+// AWS_URL IS DELIBERATELY NOT USED as a read origin. It is not this app's
+// variable: the platform sets it for its own bucket integration, and the
+// value it injects is not guaranteed to be a public origin at all. A live
+// deployment pointed it at a bucket custom domain that did not resolve, and
+// because the app treated it as one, EVERY picture on the site rendered as
+// a broken image — while the same bytes were being served correctly by
+// public/image.php. See isla_upload_public_base().
 // ============================================================
 
 require_once __DIR__ . '/env.php';
@@ -322,10 +330,11 @@ function isla_upload_delete(string $filename): void
  *
  * There are three cases, in order of preference:
  *
- *   1. A public origin is configured (UPLOADS_URL_BASE, or AWS_URL on
- *      the remote driver): the browser fetches the object directly
- *      from the bucket or CDN. Cheapest — no PHP hop, cacheable at
- *      the edge.
+ *   1. A public origin is configured (UPLOADS_URL_BASE — the app's
+ *      OWN switch, and only that; AWS_URL is deliberately ignored, see
+ *      isla_upload_public_base()): the browser fetches the object
+ *      directly from the bucket or CDN. Cheapest — no PHP hop,
+ *      cacheable at the edge.
  *   2. The remote driver with no public origin: the browser fetches
  *      'image.php?f=<name>', and public/image.php signs a read of the
  *      object server-side. Same bytes, one hop through the app.
@@ -333,12 +342,12 @@ function isla_upload_delete(string $filename): void
  *      used ('uploads/<name>'), because the file really is sitting in
  *      the web root.
  *
- * Case 2 is why a missing AWS_URL is no longer a deployment that
- * cannot show a picture. It used to be: nothing served the URL the
+ * Case 2 is why a deployment with no public origin is not a deployment
+ * that cannot show a picture. It used to be: nothing served the URL the
  * pages built, so the store was refused and the banner told the
  * operator to add a variable that Laravel Cloud shows nowhere in its
  * bucket UI. Signing the read removes that dependency entirely — a
- * public URL is now an optimisation, not a requirement.
+ * public URL is an optimisation, not a requirement.
  *
  * The filename is rawurlencode()d on every path: uploaded names are
  * random hex today, but encoding is what keeps a name with a space or
@@ -370,39 +379,39 @@ function isla_upload_url(string $filename): string
  * The origin a stored file is fetched from, without a trailing slash
  * — or '' when the file has no public URL at all.
  *
- * UPLOADS_URL_BASE is the explicit switch and wins whenever it is
- * set (that is what lets a CDN sit in front of the bucket). On the
- * remote driver a bucket's own public URL (AWS_URL) is the natural
- * fallback, so a host that injects the AWS_* variables does not ALSO
- * have to set UPLOADS_URL_BASE by hand. With the local driver an
- * empty result is CORRECT and expected: the file really is at
+ * UPLOADS_URL_BASE is the ONLY thing read here, because it is the only
+ * variable that means what this function needs it to mean: "the origin
+ * THIS app's pictures are publicly served from" (that is what lets a
+ * CDN sit in front of the bucket). With the local driver an empty
+ * result is CORRECT and expected: the file really is at
  * 'uploads/<name>' in the web root, which is what isla_upload_url()
  * falls back to.
  *
- * An empty result is NOT fatal on the remote driver either — and that
- * is the point of this helper now being advisory. It used to be the
- * gate isla_upload_store_remote() consulted before storing anything,
- * because bytes in a bucket nobody can read are a broken image behind
- * a "Profile picture updated" banner. That reasoning still holds; what
- * changed is that reads no longer depend on a public origin. With
- * none configured, isla_upload_url() returns the public/image.php URL
- * and that script signs the read. So empty now means "no fast path",
- * not "no picture" — which matters because Laravel Cloud injects
- * every other AWS_* variable and shows AWS_URL nowhere in its bucket
- * UI, so a deployment could otherwise store pictures correctly and
- * still fail to display one.
+ * AWS_URL IS DELIBERATELY IGNORED, and it used to be the remote
+ * driver's fallback. That fallback assumed AWS_URL names a public
+ * origin because that is what Laravel's filesystem config calls it —
+ * but it is the PLATFORM's variable, describing the platform's bucket
+ * binding, not this app's read path. A live deployment had it set to a
+ * bucket custom domain that did not resolve (Cloudflare 1016 / HTTP
+ * 530), and every picture on the site was a broken image while
+ * public/image.php served those same bytes perfectly. A wrong guess
+ * here is not a slow picture, it is NO picture, on every page — so the
+ * guess is gone, and only the app's own switch can enable the fast
+ * path. Setting UPLOADS_URL_BASE is how an operator opts in.
+ *
+ * An empty result is NOT fatal on the remote driver: with no public
+ * origin, isla_upload_url() returns the public/image.php URL and that
+ * script signs the read with the credentials the app already has. So
+ * empty means "no fast path", not "no picture". That is what keeps a
+ * host which injects the AWS_* variables (Laravel Cloud) working with
+ * nothing configured by hand — and, now, working even when the AWS_URL
+ * it injects points nowhere.
  *
  * @return string Base URL, or '' when there is none.
  */
 function isla_upload_public_base(): string
 {
-    $base = rtrim(trim(env('UPLOADS_URL_BASE', '')), '/');
-
-    if ($base === '' && isla_uploads_driver() === 'remote') {
-        $base = rtrim(trim(env('AWS_URL', '')), '/');
-    }
-
-    return $base;
+    return rtrim(trim(env('UPLOADS_URL_BASE', '')), '/');
 }
 
 /**

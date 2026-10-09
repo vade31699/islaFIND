@@ -155,11 +155,16 @@ set_env('UPLOADS_DRIVER', 'remote');
 set_env('UPLOADS_URL_BASE', '');
 check('remote with no public URL falls back to image.php', 'image.php?f=' . $pic, isla_upload_url($pic));
 
+// The platform's own variable is NOT a read origin. A live deployment
+// had AWS_URL pointing at a bucket custom domain that did not resolve,
+// so every picture was a broken image (Cloudflare 1016 / HTTP 530)
+// while public/image.php served the same bytes. Only the app's OWN
+// switch may turn the fast path on.
 set_env('AWS_URL', 'https://pub-abc123.r2.dev');
-check('AWS_URL is the remote driver\'s first fallback', 'https://pub-abc123.r2.dev/' . $pic, isla_upload_url($pic));
+check('AWS_URL is ignored: the signed read is used', 'image.php?f=' . $pic, isla_upload_url($pic));
 
 set_env('UPLOADS_URL_BASE', 'https://cdn.example.com/pics');
-check('UPLOADS_URL_BASE wins over AWS_URL', 'https://cdn.example.com/pics/' . $pic, isla_upload_url($pic));
+check('UPLOADS_URL_BASE alone enables the public origin', 'https://cdn.example.com/pics/' . $pic, isla_upload_url($pic));
 
 set_env('UPLOADS_URL_BASE', '');
 set_env('AWS_URL', '');
