@@ -37,8 +37,9 @@ hand-written JavaScript files.
 - **Age-gated registration** (18+) with server-side validation on every field.
 - **Device logins** — every session is listed with device, IP and last login,
   and can be logged out or revoked remotely (revoking kills the real session).
-- **Email verification and one-time codes** through PHPMailer over SMTP, with a
-  built-in fallback that shows the code on screen when mail cannot be sent.
+- **Email verification and one-time codes** through the Mailjet HTTPS API (no
+  SMTP port needed), with a built-in fallback that shows the code on screen when
+  mail cannot be sent.
 - **Delete account** — a separate danger zone that requires the account password
   *and* a typed `DELETE`, then removes **everything**: the account row, its
   listings, chats, messages, contracts, reviews, saves and interactions (every
@@ -206,7 +207,7 @@ hand-written JavaScript files.
 | Backend    | PHP 8 (procedural, one file per page), PDO with prepared statements |
 | Database   | MySQL / MariaDB (`final_app`), utf8mb4                            |
 | Frontend   | Server-rendered HTML + hand-written vanilla JavaScript, one `style.css` design system |
-| Mail       | PHPMailer 6 (Composer), SMTP with app passwords                  |
+| Mail       | PHPMailer 6 (Composer) + Mailjet HTTPS API, no SMTP port          |
 | Local host | WAMP (Apache + MySQL + PHP) on Windows                            |
 
 No build step, no bundler, no JS framework: open the folder in WAMP and it runs.
@@ -244,11 +245,11 @@ WAMP URL below working.
    database and every table. The script only ever uses
    `CREATE TABLE IF NOT EXISTS`, so it is safe to re-run.
 3. **Create your `.env`.** Copy `.env.example` to `.env` and fill in the
-   database and SMTP values.
+   database and Mailjet values.
 4. **Install the mailer** (only needed for real email): `composer install`.
 5. **Open the app** at <http://localhost/islaFIND/index.php> — the splash screen
    runs its readiness checks and hands off to the login page.
-6. **Register an account.** If SMTP is not configured yet, the verification code
+6. **Register an account.** If mail is not configured yet, the verification code
    is shown on screen instead of emailed, so you can still finish sign-up.
 
 > The **uploads** folder — now `public/uploads/` — must be writable by
@@ -265,10 +266,9 @@ All secrets live in `.env` (never committed) and are read through `env.php`:
 | -------------------- | ---------------------------------------------------- |
 | `DB_HOST` `DB_PORT`  | MySQL server address / port (default `localhost:3306`) |
 | `DB_NAME` `DB_USER` `DB_PASS` | Database and credentials (`final_app`, WAMP `root` with a blank password by default) |
-| `SMTP_HOST` `SMTP_PORT` | SMTP server (e.g. `smtp.gmail.com:587`)           |
-| `SMTP_USER` `SMTP_PASS` | SMTP login (Gmail needs a 16-character app password) |
-| `MAIL_FROM` `MAIL_FROM_NAME` | Envelope sender shown on outgoing mail        |
-| `SMTP_ENCRYPTION`    | `tls` (STARTTLS) or `ssl`                            |
+| `MAIL_DRIVER` `MAIL_API_PROVIDER` | `api` + `mailjet` — codes go out over Mailjet's HTTPS API |
+| `MAIL_API_KEY` `MAIL_API_SECRET` | Mailjet API Key + Secret Key (both required) |
+| `MAIL_FROM` `MAIL_FROM_NAME` | Sender on outgoing mail; must be verified in Mailjet |
 
 Values already present in the process environment always win over `.env`, so a
 host (Docker, CI, production) can override any key without touching the file.
@@ -562,6 +562,14 @@ add only the two keys in Render. The free plan includes 1 GB of storage.
 **Mailjet setup.** Create a free Mailjet account and verify the address
 you put in `MAIL_FROM`. Create an API key, then add both its API Key and
 Secret Key to Render. The free plan includes 6,000 e-mails per month.
+Mailjet can also block a whole account, which answers every send with
+`401 mj-0001` "Your account has been temporarily blocked" — no key or
+code change fixes that. Then set `MAIL_API_PROVIDER=brevo` instead
+(300 e-mails/day, verify `MAIL_FROM` under Settings -> Senders & IPs),
+add only `MAIL_API_KEY` (a Brevo key starts `xkeysib-`) and clear
+`MAIL_API_SECRET`; `resend` and `sendgrid` work the same way. After any
+mail change run `php _mail_api_test.php` to see the provider's actual
+answer instead of guessing.
 
 Render does **not** offer managed MySQL. Point `DB_HOST` / `DB_PORT` /
 `DB_NAME` / `DB_USER` / `DB_PASS` at the existing TiDB Cloud database
@@ -597,8 +605,8 @@ change — but the names must match the ones the app actually reads:
 | `DB_HOST` `DB_PORT` `DB_NAME` `DB_USER` `DB_PASS` | Note `DB_NAME` / `DB_USER` / `DB_PASS` — **not** the `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD` spelling some platforms inject by default |
 | `DB_SSL_CA` | **Required** for a managed MySQL (TiDB Cloud Serverless, PlanetScale, …), which refuses plaintext. Set it to `certs/lets-encrypt-roots.pem` — that file is committed, so no certificate download is needed. Relative paths resolve against the project root |
 | `DB_SSL_VERIFY` | Leave at `1` (the default) |
-| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `MAIL_FROM` `MAIL_FROM_NAME` `SMTP_ENCRYPTION` | The SMTP settings, used when `MAIL_DRIVER=smtp` (the default) |
-| `MAIL_DRIVER` | `smtp` (default) or `api`. Use `api` on Render, where the free instance blocks outbound SMTP ports |
+| `MAIL_DRIVER` `MAIL_API_PROVIDER` | `api` + `mailjet` — this project's mail path. The SMTP driver still exists in `mailer.php` but is unused here: Render's free instance blocks outbound ports 25/465/587 |
+| `MAIL_API_KEY` `MAIL_API_SECRET` `MAIL_FROM` `MAIL_FROM_NAME` | Mailjet credentials and the verified sender address |
 | `MAIL_API_PROVIDER` | `mailjet`, `brevo`, `resend` or `sendgrid` — selects the HTTPS payload in `include/mailer.php` |
 | `MAIL_API_KEY` | The provider API key. Never logged. Required when `MAIL_DRIVER=api` |
 | `MAIL_API_SECRET` | Mailjet only: the Secret Key paired with the API Key. Never logged |
@@ -699,7 +707,7 @@ these files sit in the web root):
 | File | Purpose |
 | ---- | ------- |
 | `setup_own.php` | Creates/resets `own.test@example.com` (password `Testpass1!`) with one listing, for testing owner-only screens. |
-| `_smtp_test.php` | Sends one real email and prints the whole SMTP conversation —" fastest way to debug mail settings. |
+| `_mail_api_test.php` | Sends one probe through the Mailjet API and prints the provider's raw answer — fastest way to tell a bad key from an unverified sender from an account block. |
 | `tools/create_admin.php` | Creates or resets a **superadmin** account. CLI-only. |
 
 There is also `dashboard_smoke_test.php` / `render_smoke_test.php` /

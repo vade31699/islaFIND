@@ -154,6 +154,15 @@ function sendCodeMail(string $to, string $code, string $subject, string $intro, 
             : PHPMailer::ENCRYPTION_STARTTLS;
         $mail->CharSet     = 'UTF-8';
 
+        // Bounded, because a host that DROPS SMTP ports (Render's free
+        // tier blocks 25/465/587) does not refuse the connection: it
+        // blackholes it, and PHPMailer's 300-second default kept the
+        // whole sign-in request waiting until the browser gave up. Ten
+        // seconds is enough for Gmail on a normal connection; after it,
+        // send() throws, this returns false, and the caller falls back
+        // to showing the code instead of hanging.
+        $mail->Timeout = max(1, (int) env('SMTP_TIMEOUT', '10'));
+
         $mail->setFrom($from !== '' ? $from : $user, $fromName);
         $mail->addAddress($to);
         $mail->addReplyTo($from !== '' ? $from : $user, $fromName);

@@ -36,6 +36,7 @@ echo "User matches From: " . (strcasecmp($user, $from) === 0 ? 'yes' : 'no') . "
 
 echo "--- Sending test message (SMTPDebug=2) ---\n";
 
+$ok = false;
 $mail = new PHPMailer\PHPMailer\PHPMailer(true);
 try {
     $mail->isSMTP();
@@ -56,9 +57,12 @@ try {
     $mail->Subject = 'islaFIND SMTP test';
     $mail->Body    = 'SMTP test body';
     $mail->send();
+    $ok = true;
     echo "\n*** SUCCESS — mail sent ***\n";
 } catch (\Throwable $e) {
     echo "\n*** FAILED ***\n";
     echo "Class: " . get_class($e) . "\n";
     echo "Message: " . $e->getMessage() . "\n";
 }
+
+exit($ok ? 0 : 1);

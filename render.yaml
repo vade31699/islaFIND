@@ -17,12 +17,14 @@ services:
     autoDeploy: true
     envVars:
       # --- Database (existing managed MySQL, e.g. TiDB; see README)
+      # Host/port/name are not secrets, so they live here. The user
+      # and password are entered in the Render Dashboard instead.
       - key: DB_HOST
-        sync: false
+        value: gateway01.ap-southeast-1.prod.aws.tidbcloud.com
       - key: DB_PORT
-        sync: false
+        value: "4000"
       - key: DB_NAME
-        sync: false
+        value: final_app
       - key: DB_USER
         sync: false
       - key: DB_PASS
@@ -65,7 +67,7 @@ services:
       # https://mnloorhkcxklbpznoyak.supabase.co/storage/v1/object/public/isla-uploads
       # Leave empty for a private bucket: public/image.php signs each read.
       - key: UPLOADS_URL_BASE
-        sync: false
+        value: https://mnloorhkcxklbpznoyak.supabase.co/storage/v1/object/public/isla-uploads
 
       # --- Email API (Render free blocks SMTP 25/465/587) -------
       # mailjet | brevo | resend | sendgrid
