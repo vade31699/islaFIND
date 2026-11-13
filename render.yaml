@@ -11,7 +11,7 @@ services:
     name: islafind
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     region: singapore
     healthCheckPath: /manifest.webmanifest
     autoDeploy: true
@@ -46,27 +46,37 @@ services:
       - key: TRUST_PROXY_HEADERS
         value: "1"
 
-      # --- S3-compatible object storage (R2 / S3 / B2) ----------
+      # --- Supabase Storage (free, S3-compatible) ---------------
+      # The bucket must already exist and be public if you set
+      # UPLOADS_URL_BASE to its public object path below.
       - key: AWS_BUCKET
-        sync: false
+        value: isla-uploads
       - key: AWS_ENDPOINT_URL
-        sync: false
+        value: https://mnloorhkcxklbpznoyak.storage.supabase.co/storage/v1/s3
       - key: AWS_REGION
-        sync: false
+        value: ap-northeast-2
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: S3_PATH_STYLE
         value: "1"
+      # Optional fast path. Set to the bucket's public origin, for example
+      # https://mnloorhkcxklbpznoyak.supabase.co/storage/v1/object/public/isla-uploads
+      # Leave empty for a private bucket: public/image.php signs each read.
+      - key: UPLOADS_URL_BASE
+        sync: false
 
       # --- Email API (Render free blocks SMTP 25/465/587) -------
-      # brevo | resend | sendgrid
+      # mailjet | brevo | resend | sendgrid
       - key: MAIL_DRIVER
         value: api
       - key: MAIL_API_PROVIDER
-        value: brevo
+        value: mailjet
       - key: MAIL_API_KEY
+        sync: false
+      # Mailjet only: the Secret Key paired with the API Key.
+      - key: MAIL_API_SECRET
         sync: false
       - key: MAIL_FROM
         sync: false

@@ -5,8 +5,8 @@
 # ----------------------
 # - Loads mail credentials from .env (never hardcoded, never bundled
 #   with the mobile app). MAIL_DRIVER=smtp uses PHPMailer;
-#   MAIL_DRIVER=api uses Brevo, Resend or SendGrid over HTTPS, for
-#   hosts that block outbound SMTP ports.
+#   MAIL_DRIVER=api uses Mailjet, Brevo, Resend or SendGrid over HTTPS,
+#   for hosts that block outbound SMTP ports.
 # - The .env loader is a tiny zero-dependency parser in env.php, so
 #   no runtime dependency on phpdotenv is required. db.php includes
 #   the same file, so one parser serves both.
@@ -172,40 +172,30 @@ function sendCodeMail(string $to, string $code, string $subject, string $intro, 
 }
 
 /**
- * sendCodeMailApi()
- * Delivers a one-time-code e-mail through an HTTPS email API.
+ * isla_mail_api_request()
+ * Builds the URL, headers and JSON payload for one HTTPS email API.
  *
  * MAIL_API_PROVIDER selects the wire format:
- *   brevo    — api-key header, htmlContent/textContent
- *   resend   — Bearer token, html/text
- *   sendgrid — Bearer token, personalizations/content[]
+ *   mailjet  - Basic auth, Messages[]/TextPart/HTMLPart
+ *   brevo    - api-key header, htmlContent/textContent
+ *   resend   - Bearer token, html/text
+ *   sendgrid - Bearer token, personalizations/content[]
  *
- * Secrets stay in the environment: the key is put in the request
- * header and is never written to the log, even on failure.
+ * Mailjet needs a SECOND secret (MAIL_API_SECRET), because its Basic
+ * auth password is not the API key itself. The other providers keep
+ * their single MAIL_API_KEY.
  *
- * @return bool TRUE only when the provider answered with a 2xx.
+ * Returns NULL on missing configuration or an unsupported provider, so
+ * the caller can fail closed without ever putting a secret in a log.
+ *
+ * @return array{url:string,headers:string[],payload:array<string,mixed>}|null
  */
-function sendCodeMailApi(string $to, string $subject, string $html, string $alt, string $from, string $fromName): bool
+function isla_mail_api_request(string $provider, string $to, string $subject, string $html, string $alt, string $from, string $fromName): ?array
 {
-    if ($from === '') {
-        error_log('islaFIND mailer API: MAIL_FROM is not configured');
-        return false;
-    }
-
     $key = trim(env('MAIL_API_KEY', ''));
     if ($key === '') {
         error_log('islaFIND mailer API: MAIL_API_KEY is not configured');
-        return false;
-    }
-
-    if (!function_exists('curl_init')) {
-        error_log('islaFIND mailer API: the cURL extension is not available');
-        return false;
-    }
-
-    $provider = strtolower(trim(env('MAIL_API_PROVIDER', 'brevo')));
-    if ($provider === '') {
-        $provider = 'brevo';
+        return null;
     }
 
     $headers = ['Content-Type: application/json', 'Accept: application/json'];
@@ -242,22 +232,110 @@ function sendCodeMailApi(string $to, string $subject, string $html, string $alt,
                 ['type' => 'text/html',  'value' => $html],
             ],
         ];
+    } elseif ($provider === 'mailjet') {
+        $secret = trim(env('MAIL_API_SECRET', ''));
+        if ($secret === '') {
+            error_log('islaFIND mailer API: MAIL_API_SECRET is not configured for Mailjet');
+            return null;
+        }
+
+        $url = 'https://api.mailjet.com/v3.1/send';
+        $headers[] = 'Authorization: Basic ' . base64_encode($key . ':' . $secret);
+        $payload = [
+            'Messages' => [[
+                'From'     => ['Email' => $from, 'Name' => $fromName],
+                'To'       => [['Email' => $to]],
+                'Subject'  => $subject,
+                'TextPart' => $alt,
+                'HTMLPart' => $html,
+            ]],
+        ];
     } else {
         error_log('islaFIND mailer API: unsupported MAIL_API_PROVIDER "' . $provider . '"');
+        return null;
+    }
+
+    return ['url' => $url, 'headers' => $headers, 'payload' => $payload];
+}
+
+/**
+ * isla_mail_api_response_ok()
+ * Mailjet can answer HTTP 200 while the individual message failed, so
+ * "2xx" is not enough for it: Messages[0].Status must literally say
+ * "success". The other providers use a 2xx to mean accepted.
+ *
+ * @return bool
+ */
+function isla_mail_api_response_ok(string $provider, string $body): bool
+{
+    if ($provider !== 'mailjet') {
+        return true;
+    }
+
+    $decoded = json_decode($body, true);
+    if (!is_array($decoded) || !isset($decoded['Messages']) || !is_array($decoded['Messages'])) {
         return false;
     }
 
-    $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($decoded['Messages'] === []) {
+        return false;
+    }
+
+    foreach ($decoded['Messages'] as $message) {
+        if (!is_array($message)
+            || strtolower((string) ($message['Status'] ?? '')) !== 'success'
+        ) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * sendCodeMailApi()
+ * Delivers a one-time-code e-mail through an HTTPS email API.
+ *
+ * Secrets stay in the environment: the key is put in the request
+ * header and is never written to the log, even on failure. Mailjet
+ * also has its response checked for a per-message rejection, because
+ * that provider can return HTTP 200 with Status=error.
+ *
+ * @return bool TRUE only when the provider accepted the message.
+ */
+function sendCodeMailApi(string $to, string $subject, string $html, string $alt, string $from, string $fromName): bool
+{
+    if ($from === '') {
+        error_log('islaFIND mailer API: MAIL_FROM is not configured');
+        return false;
+    }
+
+    if (!function_exists('curl_init')) {
+        error_log('islaFIND mailer API: the cURL extension is not available');
+        return false;
+    }
+
+    $provider = strtolower(trim(env('MAIL_API_PROVIDER', 'brevo')));
+    if ($provider === '') {
+        $provider = 'brevo';
+    }
+
+    $request = isla_mail_api_request($provider, $to, $subject, $html, $alt, $from, $fromName);
+    if ($request === null) {
+        return false;
+    }
+
+    $json = json_encode($request['payload'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     if ($json === false) {
         error_log('islaFIND mailer API: could not encode the request body');
         return false;
     }
 
-    $ch = curl_init($url);
+    $ch = curl_init($request['url']);
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
         CURLOPT_POSTFIELDS     => $json,
-        CURLOPT_HTTPHEADER     => $headers,
+        CURLOPT_HTTPHEADER     => $request['headers'],
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CONNECTTIMEOUT => 10,
         CURLOPT_TIMEOUT        => 15,
@@ -270,6 +348,18 @@ function sendCodeMailApi(string $to, string $subject, string $html, string $alt,
     if ($body === false || $status < 200 || $status >= 300) {
         $detail = $error !== '' ? $error : substr((string) $body, 0, 500);
         error_log('islaFIND mailer API failure (' . $provider . ', HTTP ' . $status . '): ' . $detail);
+        return false;
+    }
+
+    if (!isla_mail_api_response_ok($provider, (string) $body)) {
+        $detail = substr((string) $body, 0, 500);
+        $decoded = json_decode((string) $body, true);
+        if (is_array($decoded) && isset($decoded['Messages'][0]) && is_array($decoded['Messages'][0])) {
+            $detail = (string) ($decoded['Messages'][0]['ErrorMessage']
+                ?? $decoded['Messages'][0]['Status']
+                ?? $detail);
+        }
+        error_log('islaFIND mailer API failure (' . $provider . ', HTTP ' . $status . ', rejected): ' . substr($detail, 0, 500));
         return false;
     }
 

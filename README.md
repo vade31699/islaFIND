@@ -359,6 +359,7 @@ The dependency-free smoke tests (no PHPUnit) run from the project root:
 
 ```bash
 php s3_sign_test.php                # SigV4 signing vs AWS's documented examples (no bucket needed)
+php mailer_api_test.php             # Mailjet/Brevo/Resend/SendGrid request shapes (no network, no DB)
 php uploads_url_test.php            # which URL a picture gets + the image.php name whitelist (no bucket)
 php dashboard_smoke_test.php        # links/assets resolve + the pages load over HTTP
 php render_smoke_test.php           # every page renders for a SIGNED-IN user, with warnings on
@@ -367,9 +368,9 @@ php admin_flow_test.php             # reporting + moderation, end to end (NEEDS 
 composer test                       # runs them all
 ```
 
-`s3_sign_test.php` and `dashboard_smoke_test.php` need no database (the pages
-redirect to login before touching it), so they pass on a machine with MySQL
-stopped. **`admin_flow_test.php` does need
+`s3_sign_test.php`, `mailer_api_test.php` and `dashboard_smoke_test.php` need
+no database (the pages redirect to login before touching it), so they pass on
+a machine with MySQL stopped. **`admin_flow_test.php` does need
 one** — it creates a throwaway admin, two members and a listing, then drives a
 real report through the real handlers into the real moderation queue.
 
@@ -382,6 +383,10 @@ What they cover:
   diverge. No bucket and no credentials are involved, which is the point:
   the driver's failure mode is a 403 that otherwise only shows up the moment
   a user saves a picture.
+- **`mailer_api_test.php`** - offline: builds each HTTPS provider request
+  without sending it, pins Mailjet's Basic auth and `Messages[]` payload,
+  rejects an HTTP-200 response whose message status is `error`, and proves a
+  missing key or secret fails closed.
 - **`uploads_url_test.php`** — offline: which URL a stored picture gets under
   each driver and base combination (public origin, signed read through
   `public/image.php`, local file), that the fallback stays relative so the
@@ -522,23 +527,48 @@ extensions the app uses, and rewrites Apache to listen on Render's
 
 1. Push the repository to GitHub (or GitLab/Bitbucket).
 2. Render Dashboard → **New → Blueprint** → pick the repository.
-   `render.yaml` creates one Starter web service in Singapore with
+   `render.yaml` creates one Free web service in Singapore with
    health check `/manifest.webmanifest`.
 3. Fill every `sync: false` variable that Render prompts for: the
-   `DB_*` values, the five `AWS_*` storage values, `MAIL_API_KEY` and
-   `MAIL_FROM`. `MAIL_FROM` must be a sender verified by the provider
-   (a Brevo sender, or a Resend/SendGrid verified domain).
+   `DB_*` values, Supabase `AWS_ACCESS_KEY_ID` /
+   `AWS_SECRET_ACCESS_KEY`, `MAIL_API_KEY`, `MAIL_API_SECRET` and
+   `MAIL_FROM`. The Supabase endpoint, region and bucket are already in
+   `render.yaml`. For Mailjet, `MAIL_API_KEY` is the API Key and
+   `MAIL_API_SECRET` is the Secret Key; `MAIL_FROM` must be the verified
+   sender address. Set `UPLOADS_URL_BASE` to the public Supabase object
+   prefix if the bucket is public, or leave it empty to use signed
+   `image.php` reads.
 4. Deploy. Render builds the Dockerfile and starts Apache.
-5. Import the schema once from **Render Shell** (Starter plan):
-   `cd /var/www/html && php _import_sql.php`, then create the first
-   superadmin with `php tools/create_admin.php`.
+5. Render Free has **no Shell**. Import the schema once from your own
+   PC; the scripts connect to TiDB through the same `DB_*` values:
+
+   ```powershell
+   Get-Content .env.tidb | ForEach-Object {
+     if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+       [Environment]::SetEnvironmentVariable($matches[1], $matches[2].Trim(), 'Process')
+     }
+   }
+   php _import_sql.php
+   php tools/create_admin.php
+   ```
+
+**Supabase Storage setup.** Create a bucket named `isla-uploads`. Make
+it public for the direct image URL, or keep it private and leave
+`UPLOADS_URL_BASE` empty. Then open **Storage -> Configuration -> S3**,
+enable S3 protocol, copy the endpoint and region, and generate an access
+key pair. `render.yaml` already carries the endpoint, region and bucket;
+add only the two keys in Render. The free plan includes 1 GB of storage.
+
+**Mailjet setup.** Create a free Mailjet account and verify the address
+you put in `MAIL_FROM`. Create an API key, then add both its API Key and
+Secret Key to Render. The free plan includes 6,000 e-mails per month.
 
 Render does **not** offer managed MySQL. Point `DB_HOST` / `DB_PORT` /
 `DB_NAME` / `DB_USER` / `DB_PASS` at the existing TiDB Cloud database
 and keep `DB_SSL_CA=certs/lets-encrypt-roots.pem`; TiDB refuses a
 plaintext connection. The Render free instance also blocks outbound
 SMTP ports 25/465/587 and sleeps when idle, which is why the Blueprint
-uses `plan: starter` and `MAIL_DRIVER=api`.
+uses `plan: free` and `MAIL_DRIVER=api` with `MAIL_API_PROVIDER=mailjet`.
 
 **Behind a proxy.** Render terminates TLS at its edge and forwards
 plain HTTP, so `$_SERVER['HTTPS']` is empty inside the container and
@@ -569,8 +599,9 @@ change — but the names must match the ones the app actually reads:
 | `DB_SSL_VERIFY` | Leave at `1` (the default) |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `MAIL_FROM` `MAIL_FROM_NAME` `SMTP_ENCRYPTION` | The SMTP settings, used when `MAIL_DRIVER=smtp` (the default) |
 | `MAIL_DRIVER` | `smtp` (default) or `api`. Use `api` on Render, where the free instance blocks outbound SMTP ports |
-| `MAIL_API_PROVIDER` | `brevo` (default), `resend` or `sendgrid` — selects the HTTPS payload in `include/mailer.php` |
+| `MAIL_API_PROVIDER` | `mailjet`, `brevo`, `resend` or `sendgrid` — selects the HTTPS payload in `include/mailer.php` |
 | `MAIL_API_KEY` | The provider API key. Never logged. Required when `MAIL_DRIVER=api` |
+| `MAIL_API_SECRET` | Mailjet only: the Secret Key paired with the API Key. Never logged |
 
 **On a server that ignores `.htaccess`** (nginx), the rules in
 `public/.htaccess` do not apply. Nothing breaks — the app runs without
@@ -622,10 +653,10 @@ broken image for **every** photo while `public/image.php` served those same
 bytes — a wrong guess here is not a slow picture, it is no picture, on
 every page. The write side is the signed SigV4 PUT in `include/s3.php` — no
 SDK, no extra dependency — and the read side reuses that same signer over
-GET. On Render, create a Cloudflare R2 (or AWS S3) bucket and set the
-five `AWS_*` values yourself; Render injects no storage variables. On a
-host with a persistent disk, leave `UPLOADS_DRIVER=local` and none of this
-applies.
+GET. On Render, use a Supabase Storage bucket (or R2/AWS S3), enable the
+provider's S3 protocol, and set the `AWS_*` values yourself; Render
+injects no storage variables. On a host with a persistent disk, leave
+`UPLOADS_DRIVER=local` and none of this applies.
 
 > **An ephemeral host needs this switch explicitly.**
 The app's container disk is replaced at any time, so `UPLOADS_DRIVER=local`
