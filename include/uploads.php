@@ -345,9 +345,9 @@ function isla_upload_delete(string $filename): void
  * Case 2 is why a deployment with no public origin is not a deployment
  * that cannot show a picture. It used to be: nothing served the URL the
  * pages built, so the store was refused and the banner told the
- * operator to add a variable that Laravel Cloud shows nowhere in its
- * bucket UI. Signing the read removes that dependency entirely — a
- * public URL is an optimisation, not a requirement.
+ * operator to add a variable the bucket console does not expose. Signing
+ * the read removes that dependency entirely — a public URL is an
+ * optimisation, not a requirement.
  *
  * The filename is rawurlencode()d on every path: uploaded names are
  * random hex today, but encoding is what keeps a name with a space or
@@ -402,10 +402,11 @@ function isla_upload_url(string $filename): string
  * An empty result is NOT fatal on the remote driver: with no public
  * origin, isla_upload_url() returns the public/image.php URL and that
  * script signs the read with the credentials the app already has. So
- * empty means "no fast path", not "no picture". That is what keeps a
- * host which injects the AWS_* variables (Laravel Cloud) working with
- * nothing configured by hand — and, now, working even when the AWS_URL
- * it injects points nowhere.
+ * empty means "no fast path", not "no picture". That keeps a host which
+ * injects the AWS_* variables (Laravel Cloud, for example) working with
+ * nothing configured by hand — and working even when the AWS_URL it
+ * injects points nowhere. On Render the AWS_* values are set explicitly
+ * (see render.yaml) and UPLOADS_URL_BASE may stay empty.
  *
  * @return string Base URL, or '' when there is none.
  */

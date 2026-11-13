@@ -28,6 +28,11 @@
 // rule cannot be enforced "almost" correctly in two different pages.
 // ============================================================
 
+// isla_client_ip() below is the same proxy-aware address helper the
+// member login path uses, so the admin audit log records the visitor,
+// not Render's proxy.
+require_once __DIR__ . '/security.php';
+
 // ------------------------------------------------------------------
 // The mailer this file depends on.
 // ------------------------------------------------------------------
@@ -453,7 +458,7 @@ function admin_complete_login(PDO $pdo, int $adminId): ?array
           WHERE id = :id'
     );
     $stmt->execute([
-        ':ip' => substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45),
+        ':ip' => substr(isla_client_ip(), 0, 45),
         ':id' => (int) $admin['id'],
     ]);
 

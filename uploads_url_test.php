@@ -99,7 +99,9 @@ function run_image_php(string $driver, ?string $f): array
     // test that fails because of escaping teaches nothing.
     //
     // Every S3 setting is cleared so the "no credentials" outcome is
-    // deterministic even on a machine that has AWS_* exported.
+    // deterministic even on a machine that has AWS_* exported. Both
+    // the process environment and $_ENV must be blanked: env.php
+    // repopulates $_ENV from .env whenever the key is not set there.
     $code = "<?php\n"
         . "register_shutdown_function(function () {\n"
         . "    fwrite(STDOUT, 'STATUS=' . http_response_code() . '|');\n"
@@ -111,7 +113,7 @@ function run_image_php(string $driver, ?string $f): array
         . "ini_set('error_log', '');\n"
         . "foreach (['AWS_BUCKET', 'AWS_ENDPOINT', 'AWS_ENDPOINT_URL', 'AWS_REGION',\n"
         . "          'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_URL', 'UPLOADS_URL_BASE'] as \$k) {\n"
-        . "    putenv(\$k . '='); unset(\$_ENV[\$k]);\n"
+        . "    putenv(\$k . '='); \$_ENV[\$k] = '';\n"
         . "}\n"
         . 'putenv(' . var_export('UPLOADS_DRIVER=' . $driver, true) . ");\n"
         . "\$_ENV['UPLOADS_DRIVER'] = " . var_export($driver, true) . ";\n"

@@ -13,10 +13,12 @@
 #
 #     http://localhost/islaFIND/index.php
 #
-# On Laravel Cloud the web server is nginx, which ignores .htaccess
-# entirely, so the document root must be set to public/ there. This
-# file then has no effect at all — which is fine, because with the
-# document root on public/ the private files are already outside it.
+# A host whose web server ignores .htaccess (nginx, or the Docker
+# image's Apache with AllowOverride None) needs the document root set
+# to public/ instead. This file then has no effect at all — which is
+# fine, because with the document root on public/ the private files are
+# already outside it. The Docker image in this repository serves that
+# directory directly and never reads this file.
 #
 # The rules that actually harden the app (branded 404, security
 # headers, compression, caching) live in public/.htaccess.

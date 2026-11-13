@@ -502,8 +502,8 @@ The deploy target's **document root must be `public/`**. That one setting
 is what keeps `.env`, `certs/`, `vendor/` and the SQL dump outside the
 web root — no code change is needed for it.
 
-The stack is deliberately plain (no framework), and the host is a PHP
-runtime:
+The stack is deliberately plain (no framework). On a host that provides a
+PHP runtime, configure:
 
 | Host setting | Value |
 | ------------ | ----- |
@@ -511,6 +511,51 @@ runtime:
 | PHP | 8.2–8.5 (the app requires >= 8.0; 8.3 is the development version) |
 | Build command | `composer install --no-dev` |
 | Environment variables | See below |
+
+### Render.com (Docker)
+
+Render has **no native PHP runtime**, so this repository ships a
+`Dockerfile` and a Blueprint (`render.yaml`). The image is
+`php:8.3-apache`, serves `public/` as the document root, installs the
+extensions the app uses, and rewrites Apache to listen on Render's
+`$PORT`.
+
+1. Push the repository to GitHub (or GitLab/Bitbucket).
+2. Render Dashboard → **New → Blueprint** → pick the repository.
+   `render.yaml` creates one Starter web service in Singapore with
+   health check `/manifest.webmanifest`.
+3. Fill every `sync: false` variable that Render prompts for: the
+   `DB_*` values, the five `AWS_*` storage values, `MAIL_API_KEY` and
+   `MAIL_FROM`. `MAIL_FROM` must be a sender verified by the provider
+   (a Brevo sender, or a Resend/SendGrid verified domain).
+4. Deploy. Render builds the Dockerfile and starts Apache.
+5. Import the schema once from **Render Shell** (Starter plan):
+   `cd /var/www/html && php _import_sql.php`, then create the first
+   superadmin with `php tools/create_admin.php`.
+
+Render does **not** offer managed MySQL. Point `DB_HOST` / `DB_PORT` /
+`DB_NAME` / `DB_USER` / `DB_PASS` at the existing TiDB Cloud database
+and keep `DB_SSL_CA=certs/lets-encrypt-roots.pem`; TiDB refuses a
+plaintext connection. The Render free instance also blocks outbound
+SMTP ports 25/465/587 and sleeps when idle, which is why the Blueprint
+uses `plan: starter` and `MAIL_DRIVER=api`.
+
+**Behind a proxy.** Render terminates TLS at its edge and forwards
+plain HTTP, so `$_SERVER['HTTPS']` is empty inside the container and
+`REMOTE_ADDR` is the proxy. Two helpers handle that:
+`isla_request_is_https()` reads `X-Forwarded-Proto` for the Secure
+cookie flag, and `isla_client_ip()` reads `CF-Connecting-IP` /
+`True-Client-IP` so login throttling and the admin audit log record the
+visitor rather than the proxy. `X-Forwarded-For` is deliberately not
+trusted (Render appends to it, so a caller can prepend a fake
+address). Proxy headers are honoured only when `TRUST_PROXY_HEADERS=1`
+(set in `render.yaml`) or Render's own `RENDER=true` marker is present;
+on WAMP both helpers fall back to the old behaviour.
+
+**Build context.** `.dockerignore` excludes `.env` and `.env.*`, so a
+local `docker build .` cannot bake `.env.tidb` or any other live
+credential into an image layer. It also excludes `vendor/` (Composer
+runs inside the image), `twa/` (signing material), and local uploads.
 
 **Environment variables.** `include/env.php` reads the **process
 environment first** and only then `.env`, so a host that injects its
@@ -522,7 +567,10 @@ change — but the names must match the ones the app actually reads:
 | `DB_HOST` `DB_PORT` `DB_NAME` `DB_USER` `DB_PASS` | Note `DB_NAME` / `DB_USER` / `DB_PASS` — **not** the `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD` spelling some platforms inject by default |
 | `DB_SSL_CA` | **Required** for a managed MySQL (TiDB Cloud Serverless, PlanetScale, …), which refuses plaintext. Set it to `certs/lets-encrypt-roots.pem` — that file is committed, so no certificate download is needed. Relative paths resolve against the project root |
 | `DB_SSL_VERIFY` | Leave at `1` (the default) |
-| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `MAIL_FROM` `MAIL_FROM_NAME` `SMTP_ENCRYPTION` | The mail settings |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `MAIL_FROM` `MAIL_FROM_NAME` `SMTP_ENCRYPTION` | The SMTP settings, used when `MAIL_DRIVER=smtp` (the default) |
+| `MAIL_DRIVER` | `smtp` (default) or `api`. Use `api` on Render, where the free instance blocks outbound SMTP ports |
+| `MAIL_API_PROVIDER` | `brevo` (default), `resend` or `sendgrid` — selects the HTTPS payload in `include/mailer.php` |
+| `MAIL_API_KEY` | The provider API key. Never logged. Required when `MAIL_DRIVER=api` |
 
 **On a server that ignores `.htaccess`** (nginx), the rules in
 `public/.htaccess` do not apply. Nothing breaks — the app runs without
@@ -535,9 +583,11 @@ them — but here is what is lost and where each rule should go instead:
 | Compression + static caching | Better handled by the platform's CDN or edge |
 | The deny on `.env`, the dump, `composer.*` | Not needed once the document root is `public/`: those files are outside it. **Never** point the document root at the project root |
 
-**Host switches.** A host with no persistent disk and no `.htaccess` needs
-three settings changed. Every one of them defaults to the local WAMP
-behaviour, so none of this touches local development:
+**Host switches.** An ephemeral host needs these. Every one of them
+defaults to the local WAMP behaviour, so none of this touches local
+development. Render's Docker image runs Apache and reads `public/.htaccess`,
+so leave `SEND_SECURITY_HEADERS=0` there; set it to `1` only on a host
+that ignores `.htaccess`:
 
 | Variable | Default | Set to | What it does |
 | -------- | ------- | ------ | ------------ |
@@ -545,6 +595,7 @@ behaviour, so none of this touches local development:
 | `SEND_SECURITY_HEADERS` | `0` | `1` | Sends the four hardening headers from PHP, for a host that ignores `.htaccess`. Leave `0` under Apache. |
 | `UPLOADS_DRIVER` | `local` | `remote` | Stores uploads in S3-compatible object storage so they survive a deploy. |
 | `UPLOADS_URL_BASE` | empty | bucket/CDN origin | Makes every page render pictures from that origin. When empty, reads go through the signed read in `public/image.php`. This is the only switch that enables the direct fast path — `AWS_URL` is ignored on purpose. |
+| `TRUST_PROXY_HEADERS` | `0` | `1` | Trusts `CF-Connecting-IP` / `True-Client-IP` / `X-Forwarded-Proto` from the hosting proxy. Required behind Render so the login throttle sees the visitor's address and the session cookie keeps `Secure`. Auto-enabled when `RENDER=true`. |
 
 **Sessions — done.** `SESSION_DRIVER=mysql` swaps in the handler in
 `include/session_store.php`. It stores PHP's own serialised payload in a
@@ -571,20 +622,18 @@ broken image for **every** photo while `public/image.php` served those same
 bytes — a wrong guess here is not a slow picture, it is no picture, on
 every page. The write side is the signed SigV4 PUT in `include/s3.php` — no
 SDK, no extra dependency — and the read side reuses that same signer over
-GET. On Laravel Cloud, attaching a bucket as the environment's default
-disk injects `AWS_BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`,
-`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` automatically, and that is
-all a deployment needs. On a host with a persistent disk, leave
-`UPLOADS_DRIVER=local` and none of this applies.
+GET. On Render, create a Cloudflare R2 (or AWS S3) bucket and set the
+five `AWS_*` values yourself; Render injects no storage variables. On a
+host with a persistent disk, leave `UPLOADS_DRIVER=local` and none of this
+applies.
 
-> **Laravel Cloud is the ephemeral case, and it needs ONE variable.**
+> **An ephemeral host needs this switch explicitly.**
 The app's container disk is replaced at any time, so `UPLOADS_DRIVER=local`
 (the default) writes pictures to a filesystem that will not be there next
 request: the upload reports success, the row is saved, and every card
-shows a broken image. Attaching a bucket is not enough on its own —
-`Laravel Cloud` injects the five `AWS_*` connection variables, but it does
-**not** inject this switch. Set it as a custom environment variable and
-redeploy:
+shows a broken image. Creating a bucket is not enough on its own — some
+platforms inject the five `AWS_*` connection variables but not this
+switch. Set it as a custom environment variable and redeploy:
 >
 > | Variable | Value |
 > | -------- | ----- |

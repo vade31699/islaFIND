@@ -3,8 +3,10 @@
 # ------------------------------------------------------------------
 # islaFIND mailer helper
 # ----------------------
-# - Loads SMTP credentials from .env (never hardcoded, never bundled
-#   with the mobile app).
+# - Loads mail credentials from .env (never hardcoded, never bundled
+#   with the mobile app). MAIL_DRIVER=smtp uses PHPMailer;
+#   MAIL_DRIVER=api uses Brevo, Resend or SendGrid over HTTPS, for
+#   hosts that block outbound SMTP ports.
 # - The .env loader is a tiny zero-dependency parser in env.php, so
 #   no runtime dependency on phpdotenv is required. db.php includes
 #   the same file, so one parser serves both.
@@ -106,10 +108,28 @@ function sendEmailChangeCode(string $to, string $code): bool
     );
 }
 
-# Shared SMTP sender behind every one-time-code e-mail.
+# Shared sender behind every one-time-code e-mail.
+#
+# MAIL_DRIVER=smtp (the default) keeps the original PHPMailer path, so
+# local WAMP behaviour does not change. MAIL_DRIVER=api sends the same
+# message over HTTPS instead, for hosts that block outbound SMTP ports
+# (Render's free tier blocks 25/465/587). Both paths return false on
+# failure, which keeps the caller's on-screen-code fallback working.
 function sendCodeMail(string $to, string $code, string $subject, string $intro, string $note): bool
 {
-    if (!class_exists(\PHPMailer\PHPMailer\PHPMailer::class)) {
+    $html = '<p>' . htmlspecialchars($intro, ENT_QUOTES, 'UTF-8') . '</p>'
+          . '<p style="font-size:28px;font-weight:bold;letter-spacing:4px;">' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '</p>'
+          . '<p>' . htmlspecialchars($note, ENT_QUOTES, 'UTF-8') . '</p>';
+    $alt = $intro . ' ' . $code . ' ' . $note;
+
+    $from     = trim(env('MAIL_FROM', env('SMTP_USER', '')));
+    $fromName = env('MAIL_FROM_NAME', 'islaFIND');
+
+    if (strtolower(trim(env('MAIL_DRIVER', 'smtp'))) === 'api') {
+        return sendCodeMailApi($to, $subject, $html, $alt, $from, $fromName);
+    }
+
+    if (!class_exists(PHPMailer::class)) {
         return false;
     }
 
@@ -134,24 +154,126 @@ function sendCodeMail(string $to, string $code, string $subject, string $intro, 
             : PHPMailer::ENCRYPTION_STARTTLS;
         $mail->CharSet     = 'UTF-8';
 
-        $mail->setFrom(env('MAIL_FROM', $user), env('MAIL_FROM_NAME', 'islaFIND'));
+        $mail->setFrom($from !== '' ? $from : $user, $fromName);
         $mail->addAddress($to);
-        $mail->addReplyTo(env('MAIL_FROM', $user), env('MAIL_FROM_NAME', 'islaFIND'));
+        $mail->addReplyTo($from !== '' ? $from : $user, $fromName);
 
         $mail->Subject = $subject;
 
         $mail->isHTML(true);
-        $mail->Body = '<p>' . htmlspecialchars($intro, ENT_QUOTES, 'UTF-8') . '</p>'
-                    . '<p style="font-size:28px;font-weight:bold;letter-spacing:4px;">' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '</p>'
-                    . '<p>' . htmlspecialchars($note, ENT_QUOTES, 'UTF-8') . '</p>';
-
-        $mail->AltBody = $intro . ' ' . $code . ' ' . $note;
+        $mail->Body    = $html;
+        $mail->AltBody = $alt;
 
         return $mail->send();
     } catch (\Throwable $e) {
         error_log('islaFIND mailer failure: ' . $e->getMessage());
         return false;
     }
+}
+
+/**
+ * sendCodeMailApi()
+ * Delivers a one-time-code e-mail through an HTTPS email API.
+ *
+ * MAIL_API_PROVIDER selects the wire format:
+ *   brevo    — api-key header, htmlContent/textContent
+ *   resend   — Bearer token, html/text
+ *   sendgrid — Bearer token, personalizations/content[]
+ *
+ * Secrets stay in the environment: the key is put in the request
+ * header and is never written to the log, even on failure.
+ *
+ * @return bool TRUE only when the provider answered with a 2xx.
+ */
+function sendCodeMailApi(string $to, string $subject, string $html, string $alt, string $from, string $fromName): bool
+{
+    if ($from === '') {
+        error_log('islaFIND mailer API: MAIL_FROM is not configured');
+        return false;
+    }
+
+    $key = trim(env('MAIL_API_KEY', ''));
+    if ($key === '') {
+        error_log('islaFIND mailer API: MAIL_API_KEY is not configured');
+        return false;
+    }
+
+    if (!function_exists('curl_init')) {
+        error_log('islaFIND mailer API: the cURL extension is not available');
+        return false;
+    }
+
+    $provider = strtolower(trim(env('MAIL_API_PROVIDER', 'brevo')));
+    if ($provider === '') {
+        $provider = 'brevo';
+    }
+
+    $headers = ['Content-Type: application/json', 'Accept: application/json'];
+
+    if ($provider === 'brevo') {
+        $url = 'https://api.brevo.com/v3/smtp/email';
+        $headers[] = 'api-key: ' . $key;
+        $payload = [
+            'sender'      => ['email' => $from, 'name' => $fromName],
+            'to'          => [['email' => $to]],
+            'subject'     => $subject,
+            'htmlContent' => $html,
+            'textContent' => $alt,
+        ];
+    } elseif ($provider === 'resend') {
+        $url = 'https://api.resend.com/emails';
+        $headers[] = 'Authorization: Bearer ' . $key;
+        $payload = [
+            'from'    => $fromName . ' <' . $from . '>',
+            'to'      => [$to],
+            'subject' => $subject,
+            'html'    => $html,
+            'text'    => $alt,
+        ];
+    } elseif ($provider === 'sendgrid') {
+        $url = 'https://api.sendgrid.com/v3/mail/send';
+        $headers[] = 'Authorization: Bearer ' . $key;
+        $payload = [
+            'personalizations' => [['to' => [['email' => $to]]]],
+            'from'             => ['email' => $from, 'name' => $fromName],
+            'subject'          => $subject,
+            'content'          => [
+                ['type' => 'text/plain', 'value' => $alt],
+                ['type' => 'text/html',  'value' => $html],
+            ],
+        ];
+    } else {
+        error_log('islaFIND mailer API: unsupported MAIL_API_PROVIDER "' . $provider . '"');
+        return false;
+    }
+
+    $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+        error_log('islaFIND mailer API: could not encode the request body');
+        return false;
+    }
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $json,
+        CURLOPT_HTTPHEADER     => $headers,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_TIMEOUT        => 15,
+    ]);
+
+    $body   = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $error  = curl_error($ch);
+
+    if ($body === false || $status < 200 || $status >= 300) {
+        $detail = $error !== '' ? $error : substr((string) $body, 0, 500);
+        error_log('islaFIND mailer API failure (' . $provider . ', HTTP ' . $status . '): ' . $detail);
+        return false;
+    }
+
+    return true;
 }
 
 # The SMTP credentials are already loaded: env.php reads .env at

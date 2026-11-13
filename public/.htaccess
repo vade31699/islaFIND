@@ -10,9 +10,10 @@
 # Optional by design: every rule here is a nicety, not a dependency.
 # On a server that ignores .htaccess (nginx, or Apache with
 # AllowOverride None) the app still runs — it simply loses the
-# branded 404 screen and the extra hardening below. On Laravel
-# Cloud, which is nginx, that is exactly what happens; see README
-# ("Deploying") for what replaces each rule.
+# branded 404 screen and the extra hardening below. On nginx, or on
+# Apache with AllowOverride None, that is exactly what happens; see
+# README ("Deploying") for what replaces each rule. The Render Docker
+# image enables AllowOverride All, so these rules do apply there.
 #
 # Requires the Apache modules: mod_rewrite (bundled and enabled by
 # default in WAMP), mod_headers, mod_deflate and mod_expires.

@@ -1,0 +1,74 @@
+# ============================================================
+# render.yaml — Render Blueprint for islaFIND
+#
+# Secrets use `sync: false`, so Render prompts for them in the
+# dashboard instead of storing them in this file. The non-secret
+# values below are the deployment switches described in README
+# ("Deploying").
+# ============================================================
+services:
+  - type: web
+    name: islafind
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: singapore
+    healthCheckPath: /manifest.webmanifest
+    autoDeploy: true
+    envVars:
+      # --- Database (existing managed MySQL, e.g. TiDB; see README)
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
+      - key: DB_SSL_CA
+        value: certs/lets-encrypt-roots.pem
+      - key: DB_SSL_VERIFY
+        value: "1"
+
+      # --- Host switches ----------------------------------------
+      # Apache reads public/.htaccess, so PHP must not send a
+      # duplicate set of hardening headers.
+      - key: SESSION_DRIVER
+        value: mysql
+      - key: SEND_SECURITY_HEADERS
+        value: "0"
+      - key: UPLOADS_DRIVER
+        value: remote
+      # Render terminates TLS and proxies every request; allow the app
+      # to read the real client IP / scheme from its proxy headers.
+      - key: TRUST_PROXY_HEADERS
+        value: "1"
+
+      # --- S3-compatible object storage (R2 / S3 / B2) ----------
+      - key: AWS_BUCKET
+        sync: false
+      - key: AWS_ENDPOINT_URL
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_PATH_STYLE
+        value: "1"
+
+      # --- Email API (Render free blocks SMTP 25/465/587) -------
+      # brevo | resend | sendgrid
+      - key: MAIL_DRIVER
+        value: api
+      - key: MAIL_API_PROVIDER
+        value: brevo
+      - key: MAIL_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: islaFIND

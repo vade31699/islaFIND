@@ -103,6 +103,58 @@ function sid_append(string $url): string
 }
 
 /**
+ * isla_trusts_proxy_headers()
+ * May the app believe X-Forwarded-* / CF-Connecting-IP / True-Client-IP?
+ *
+ * Those headers are ordinary caller-supplied text on a direct
+ * connection. Trust them only where a proxy is known to overwrite them:
+ * Render sets RENDER=true, and TRUST_PROXY_HEADERS=1 covers any other
+ * proxy setup explicitly. Both are false on WAMP.
+ *
+ * @return bool TRUE when proxy headers are trustworthy.
+ */
+function isla_trusts_proxy_headers(): bool
+{
+    return env('TRUST_PROXY_HEADERS', '0') === '1'
+        || strtolower(env('RENDER', '')) === 'true';
+}
+
+/**
+ * isla_request_is_https()
+ * Did the visitor connect over HTTPS?
+ *
+ * A reverse proxy (Render, and Cloudflare in front of it) terminates
+ * TLS at the edge and forwards plain HTTP to the container. Inside
+ * Apache `$_SERVER['HTTPS']` is therefore empty even though the visitor
+ * is on HTTPS, and the session cookie would lose its Secure flag. The
+ * proxy reports the original scheme in X-Forwarded-Proto.
+ *
+ * Only the first token is read, because a proxy chain may append to the
+ * header. Spoofing this value can only change our own cookie flags, so
+ * the worst case is a SameSite=Lax cookie, not a leaked session.
+ *
+ * @return bool TRUE when the request reached the user over HTTPS.
+ */
+function isla_request_is_https(): bool
+{
+    if (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off') {
+        return true;
+    }
+
+    if (isla_trusts_proxy_headers()) {
+        $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '';
+        if (is_string($proto) && $proto !== '') {
+            $first = strtolower(trim(explode(',', $proto)[0]));
+            if ($first === 'https') {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
  * session_harden()
  * Tightens the session cookie BEFORE session_start() is called:
  *  - HttpOnly:  the cookie is invisible to JavaScript, so an XSS
@@ -136,7 +188,7 @@ function session_harden(): void
     $host = $_SERVER['HTTP_HOST'] ?? '';
     $isLocalSecure = $host === 'localhost'
         || strpos($host, '.localhost') === strlen($host) - strlen('.localhost');
-    $secure = !empty($_SERVER['HTTPS']) || $isLocalSecure;
+    $secure = isla_request_is_https() || $isLocalSecure;
 
     session_set_cookie_params([
         'lifetime' => 0,        // Session cookie: expires when the browser closes
@@ -710,13 +762,23 @@ function login_backoff_seconds(int $failures): int
 }
 
 /**
- * login_attempt_client_ip()
- * The address a throttled attempt is counted against.
+ * isla_client_ip()
+ * The visitor's address as seen through the hosting proxy.
  *
- * Deliberately reads REMOTE_ADDR (the socket address) and NOT
- * X-Forwarded-For: that header is just text the caller sends, so
- * trusting it would let a bot hand itself a brand-new IP — and with
- * it a brand-new counter — on every single request.
+ * On WAMP, REMOTE_ADDR is the visitor and behaves exactly as before.
+ * Behind Render, REMOTE_ADDR is the proxy's own address, so every
+ * visitor would share one login-throttle counter. Render passes the
+ * original address in CF-Connecting-IP (Cloudflare in front) or
+ * True-Client-IP.
+ *
+ * X-Forwarded-For is deliberately NOT read: Render appends to that
+ * header rather than replacing it, so a caller can prepend a fabricated
+ * address and farm a fresh counter on every request.
+ *
+ * Those proxy headers are just caller-supplied text on a direct
+ * connection, so they are trusted only when TRUST_PROXY_HEADERS=1 (set
+ * in render.yaml) or when Render's own RENDER=true marker is present.
+ * On WAMP neither is true, and this reads REMOTE_ADDR exactly as before.
  *
  * The address is re-encoded through inet_pton()/inet_ntop() so every
  * spelling of one address collapses to a single form: IPv6 has many
@@ -725,12 +787,55 @@ function login_backoff_seconds(int $failures): int
  *
  * @return string Normalised client IP, or '0.0.0.0' when unknown.
  */
+function isla_client_ip(): string
+{
+    $candidates = [$_SERVER['REMOTE_ADDR'] ?? ''];
+
+    if (isla_trusts_proxy_headers()) {
+        array_unshift(
+            $candidates,
+            $_SERVER['HTTP_CF_CONNECTING_IP'] ?? '',
+            $_SERVER['HTTP_TRUE_CLIENT_IP'] ?? ''
+        );
+    }
+
+    foreach ($candidates as $candidate) {
+        if (!is_string($candidate)) {
+            continue;
+        }
+
+        $candidate = trim($candidate);
+
+        // A proxy may send a comma-separated list; only a bare address
+        // is trustworthy here.
+        if ($candidate === '' || strpos($candidate, ',') !== false) {
+            continue;
+        }
+
+        if (filter_var($candidate, FILTER_VALIDATE_IP) === false) {
+            continue;
+        }
+
+        $packed = @inet_pton($candidate);
+
+        return $packed === false ? $candidate : inet_ntop($packed);
+    }
+
+    return '0.0.0.0';
+}
+
+/**
+ * login_attempt_client_ip()
+ * The address a throttled attempt is counted against.
+ *
+ * Shares isla_client_ip() with the rest of the app, so the address the
+ * throttle records is the same one the session and admin audit log see.
+ *
+ * @return string Normalised client IP, or '0.0.0.0' when unknown.
+ */
 function login_attempt_client_ip(): string
 {
-    $raw    = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-    $packed = @inet_pton($raw);
-
-    return $packed === false ? $raw : inet_ntop($packed);
+    return isla_client_ip();
 }
 
 /**

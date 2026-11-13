@@ -1,0 +1,35 @@
+# ============================================================
+# .dockerignore — keep secrets and local-only files out of the image
+#
+# The important entry is .env / .env.*: a local `docker build .` must
+# never bake the real credentials (including .env.tidb) into a layer.
+# Render builds from git, where those files are already ignored, but a
+# local build uses the filesystem and would otherwise include them.
+# ============================================================
+
+.git
+.gitignore
+.github
+.idea
+.vscode
+
+# Secrets and local configuration
+.env
+.env.*
+
+# Composer is run inside the image
+vendor/
+
+# Android/TWA project and its signing material
+twa/
+
+# Local test captures
+screenshots/
+
+# User uploads from the local machine (keep the directory rule)
+public/uploads/*
+!public/uploads/.htaccess
+
+# Logs and backups
+*.log
+*.bak

@@ -35,14 +35,15 @@
 // the platform's own bucket binding, not to this app's read path. Only
 // UPLOADS_URL_BASE (uploads.php) names an origin this app will trust.
 //
-// Laravel Cloud injects AWS_BUCKET / AWS_ENDPOINT_URL / AWS_REGION /
-// AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY automatically once a
-// bucket is attached as the environment's default disk. It also sets
-// AWS_URL for its own binding — which this app deliberately ignores as
-// a read origin (see uploads.php): a value that does not resolve would
-// otherwise break every picture on the site. UPLOADS_URL_BASE is the
-// app's own switch, and setting it to a CDN origin is a one-line
-// change.
+// Some platforms (Laravel Cloud, for example) inject AWS_BUCKET /
+// AWS_ENDPOINT_URL / AWS_REGION / AWS_ACCESS_KEY_ID /
+// AWS_SECRET_ACCESS_KEY automatically once a bucket is attached as the
+// environment's default disk. Render does not: set all five yourself.
+// A platform may also set AWS_URL for its own binding — which this app
+// deliberately ignores as a read origin (see uploads.php): a value that
+// does not resolve would otherwise break every picture on the site.
+// UPLOADS_URL_BASE is the app's own switch, and setting it to a CDN
+// origin is a one-line change.
 // ============================================================
 
 require_once __DIR__ . '/env.php';

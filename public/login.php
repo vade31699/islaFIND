@@ -164,8 +164,8 @@ function trackDevice(PDO $pdo, int $customUserId): void
     $platform = preg_match('/android|iphone|ipad|mobile/i', $ua) ? 'Mobile' : 'Desktop';
     $deviceName = $browser . ' / ' . $platform;
 
-    // The visitor's IP address.
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    // The visitor's IP address (proxy-aware: see isla_client_ip()).
+    $ip = isla_client_ip();
 
     // Upsert: one row per session id (re-login refreshes the row).
     $stmt = $pdo->prepare(
