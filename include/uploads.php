@@ -474,7 +474,17 @@ function isla_upload_store_remote(string $tmpPath, string $filename): bool
 
     $result = isla_s3_put(basename($filename), $bytes, $type);
     if (!$result['ok']) {
-        isla_upload_set_error('The picture could not be saved to object storage. Please try again.');
+        // The banner says WHICH KIND of failure this was, because the
+        // three answers need three different fixes and the operator may
+        // have nothing but the page in front of them: a status of 0
+        // means the request never left (network, TLS, no cURL), 401/403
+        // means the credentials or the bucket policy refused the write,
+        // 404 means the endpoint or the bucket name is wrong. The
+        // service's own error body still goes to the log, not the page.
+        isla_upload_set_error($result['status'] === 0
+            ? 'The picture could not be saved: the storage service could not be reached. Please try again.'
+            : 'The picture could not be saved to object storage (storage answered HTTP '
+                . $result['status'] . '). Please try again.');
         error_log(
             'islaFIND: object-storage PUT for ' . $filename . ' failed (HTTP '
             . $result['status'] . '): ' . $result['error'] . ' '

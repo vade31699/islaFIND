@@ -364,6 +364,14 @@ function isla_s3_send(string $method, string $key, string $body, string $content
         'x-amz-content-sha256: ' . $payloadHash,
         'x-amz-date: ' . $amzDate,
         'Host: ' . $target['host'],
+        // cURL offers "Expect: 100-continue" for any body over 1 KB, so a
+        // picture upload offers it and a small request never does. Every
+        // request here already carries Content-Length, so the offer buys
+        // nothing — and an S3-compatible endpoint (or the proxy in front
+        // of it) that mishandles the interim 100 response can stall or
+        // refuse a body that GETs of the same bucket never exercise. An
+        // empty value is how cURL is told to drop the header.
+        'Expect:',
     ];
     if ($contentType !== '') {
         $httpHeaders[] = 'Content-Type: ' . $contentType;
@@ -374,8 +382,11 @@ function isla_s3_send(string $method, string $key, string $body, string $content
         CURLOPT_CUSTOMREQUEST  => $method,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER     => $httpHeaders,
-        CURLOPT_TIMEOUT        => 30,
-        CURLOPT_CONNECTTIMEOUT => 10,
+        // A PUT carries up to a 5 MB picture, so it gets a budget sized
+        // for a small container's uplink; a read or a delete stays tight
+        // so a dead endpoint cannot hold a page open.
+        CURLOPT_TIMEOUT        => $method === 'PUT' ? 90 : 30,
+        CURLOPT_CONNECTTIMEOUT => 15,
     ]);
     if ($method === 'PUT') {
         curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
