@@ -1,0 +1,16 @@
+# islaFIND Android APK downloads.
+# version.json is how the installed app discovers a new release; it
+# must never be cached. The APK itself is always downloaded in full.
+
+<IfModule mod_mime.c>
+    AddType application/vnd.android.package-archive .apk
+</IfModule>
+
+<IfModule mod_headers.c>
+    <FilesMatch "^version\.json$">
+        Header set Cache-Control "no-store, max-age=0"
+    </FilesMatch>
+    <FilesMatch "\.apk$">
+        Header set Content-Disposition "attachment"
+    </FilesMatch>
+</IfModule>

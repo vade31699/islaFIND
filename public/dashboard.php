@@ -1231,6 +1231,17 @@ include __DIR__ . '/../include/head_meta.php';
                                     <span class="menu-chevron">&#8250;</span>
                                 </button>
                             </li>
+                            <li>
+                                <!-- Android app only: app_update.js reveals
+                                     this row and starts the native updater.
+                                     It stays hidden in a plain browser. -->
+                                <button type="button" class="menu-item" data-app-update hidden>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 21h14"/></svg>
+                                    <span class="menu-label">App update</span>
+                                    <span class="menu-status" data-app-update-status></span>
+                                    <span class="menu-chevron">&#8250;</span>
+                                </button>
+                            </li>
                         </ul>
 
                         <!-- Log Out button pinned at the bottom of the

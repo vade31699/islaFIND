@@ -29,6 +29,10 @@
     https://developers.google.com/web/updates/2017/10/using-twa#set_up_digital_asset_links_in_an_android_app
     and is injected into the AndroidManifest.xml
   -->
+  <!-- Where the update checker looks for the published version. -->
+  <string name="updateTitle">Update islaFIND</string>
+  <string name="updateManifestUrl">https://islafind.onrender.com/app/version.json</string>
+
   <string name="assetStatements">
     [{
         \"relation\": [\"delegate_permission/common.handle_all_urls\"],

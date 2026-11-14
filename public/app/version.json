@@ -1,0 +1,7 @@
+{
+  "versionCode": 2,
+  "versionName": "1.1.0",
+  "apkUrl": "https://islafind.onrender.com/app/islafind-latest.apk",
+  "sha256": "9f0c0bb2b65e4d5e86719d2c1d08f96e7c5aadc2b3356d7a4d278b1429dc4465",
+  "notes": "Adds an in-app update button."
+}

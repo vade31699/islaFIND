@@ -47,8 +47,12 @@ public class LauncherActivity
         // Get the original launch Url.
         Uri uri = super.getLaunchingUrl();
 
-        
-
-        return uri;
+        // Tell the website which build is installed, so it can show the
+        // "App update" row only when a newer APK has been published.
+        // The values are stored in localStorage by app_update.js.
+        return uri.buildUpon()
+                .appendQueryParameter("appv", String.valueOf(UpdateActivity.installedVersionCode(this)))
+                .appendQueryParameter("isla_app", "1")
+                .build();
     }
 }

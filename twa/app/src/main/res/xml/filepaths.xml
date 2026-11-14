@@ -15,4 +15,7 @@
 -->
 <paths>
     <files-path path="twa_splash/" name="twa_splash" />
+    <!-- The downloaded update APK lives here until the installer
+         reads it through this provider. -->
+    <cache-path path="updates/" name="updates" />
 </paths>
