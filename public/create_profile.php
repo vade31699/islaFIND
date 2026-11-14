@@ -63,6 +63,15 @@ if ($editId > 0) {
 
 $csrf = htmlspecialchars(csrf_token());
 
+// --- 5b. Google Maps browser key (optional) ---------------------
+// When this is set, the BUSINESS pin step embeds an interactive map
+// (search + draggable pin) instead of asking the owner to paste a
+// link. Without it — a fresh checkout with no .env — the old
+// paste-a-link block is rendered, so the form keeps working. The key
+// is a browser key and is necessarily visible in the page source;
+// restrict it by HTTP referrer in Google Cloud.
+$googleMapsKey = trim(env('GOOGLE_MAPS_API_KEY', ''));
+
 // --- 6. Form state: prefill from the profile being edited -------
 // save_profile.php stores rejected input + errors in a one-shot
 // flash so this page can re-render them after a failed submit.
@@ -104,9 +113,10 @@ $headTitle = ($provider ? 'Edit' : 'Create') . ' Profile';
 $headDesc  = 'List your skill or business on the islaFIND directory for Bantayan Island.';
 include __DIR__ . '/../include/head_meta.php';
 ?>
-    <!-- No map library is loaded: the BUSINESS pin is placed on the
-         real Google Maps in a separate tab (keyless), and the resulting
-         coordinates are pasted back into the form. See maps_pinning.js. -->
+    <!-- When GOOGLE_MAPS_API_KEY is configured the BUSINESS pin is
+         placed on an embedded Google Map; without a key the form falls
+         back to opening Google Maps in a separate tab and pasting the
+         link back. See maps_pinning.js. -->
 </head>
 <body class="auth-body">
 
@@ -233,12 +243,13 @@ include __DIR__ . '/../include/head_meta.php';
                        - INDIVIDUAL SKILLS -> "Pin My Current Location":
                          the worker moves around, so their live GPS fix is
                          the answer.
-                       - BUSINESS -> pin on Google Maps: a shop has ONE
-                         fixed address, and the person listing it may not
-                         even be standing there, so GPS is the wrong tool.
-                         The owner opens Google Maps in a new tab, drops a
-                         pin on the shop, then pastes the link or the
-                         "lat, lng" numbers back here.
+                       - BUSINESS -> pin on an embedded Google Map: a shop
+                         has ONE fixed address, and the person listing it
+                         may not even be standing there, so GPS is the
+                         wrong tool. The owner searches for the business
+                         (or taps the map) and drags the pin, and the
+                         coordinates land here. With no API key the block
+                         falls back to the older paste-a-link flow.
                      Both flows write the SAME hidden inputs below, so
                      save_profile.php cannot tell (and does not care)
                      which one produced the numbers. The BUSINESS pin is
@@ -271,31 +282,48 @@ include __DIR__ . '/../include/head_meta.php';
                     <p class="map-picker-hint" id="gpsPinHint"<?php echo (($oldInput['latitude'] ?? '') !== '' && ($oldInput['longitude'] ?? '') !== '') ? ' hidden' : ''; ?>>Your pin comes from your device&rsquo;s GPS. Pasting a Google Maps pin by hand is a business-listing option only, so it is not offered here. You can also skip the pin and still save your listing.</p>
                 </div>
 
-                <!-- BUSINESS ONLY: manual pin on Google Maps. The link
-                     opens Google Maps in a new tab (maps_pinning.js
-                     points it at the chosen municipality); the owner
-                     drops a pin, then pastes the link or the numbers
-                     into the box. An INDIVIDUAL listing never gets this
-                     block — see the GPS hint above. -->
+                <!-- BUSINESS ONLY: pin the shop on a map. With
+                     GOOGLE_MAPS_API_KEY set, maps_pinning.js turns
+                     #gmapsMap into an interactive Google Map: search the
+                     business name, tap the map or drag the pin. Without a
+                     key, the older link + paste box is rendered instead,
+                     so a checkout with no key still works. An INDIVIDUAL
+                     listing never gets this block — see the GPS hint. -->
                 <div class="form-group" id="gmapsPinGroup"
                      style="<?php echo $oldInput['profile_type'] === 'business' ? '' : 'display:none'; ?>">
-                    <a href="https://www.google.com/maps" target="_blank" rel="noopener"
-                       class="btn btn-pin" id="openGmapsBtn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
-                        Pin my business on Google Maps
-                    </a>
-                    <label class="field-label" for="gmapsPaste" style="margin-top:12px;">Paste the Google Maps link or coordinates (required)</label>
-                    <div class="input-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                        <input type="text" id="gmapsPaste" autocomplete="off"
-                               placeholder="e.g. 11.297029, 123.730595"
-                               aria-label="Google Maps link or coordinates">
-                    </div>
+                    <?php if ($googleMapsKey !== ''): ?>
+                        <div class="field-label">Find your business on the map (required)</div>
+                        <div class="gmaps-search" id="gmapsSearch"></div>
+                        <div class="gmaps-map" id="gmapsMap"
+                             role="application" aria-label="Business location map"></div>
+                        <p class="map-picker-hint">Search your business name or address, then drag the pin (or tap the map) to set the exact spot.</p>
+                        <details class="gmaps-fallback">
+                            <summary>Or paste a Google Maps link</summary>
+                            <input type="text" id="gmapsPaste" autocomplete="off"
+                                   placeholder="e.g. https://maps.app.goo.gl/&hellip; or 11.297029, 123.730595"
+                                   aria-label="Google Maps link or coordinates">
+                        </details>
+                    <?php else: ?>
+                        <a href="https://www.google.com/maps" target="_blank" rel="noopener"
+                           class="btn btn-pin" id="openGmapsBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+                            Pin my business on Google Maps
+                        </a>
+                        <label class="field-label" for="gmapsPaste" style="margin-top:12px;">Paste the Google Maps link or coordinates (required)</label>
+                        <div class="input-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                            <input type="text" id="gmapsPaste" autocomplete="off"
+                                   placeholder="e.g. 11.297029, 123.730595"
+                                   aria-label="Google Maps link or coordinates">
+                        </div>
+                    <?php endif; ?>
                     <!-- Inline block message: maps_pinning.js reveals it
                          when a BUSINESS form is submitted with no pin.
                          save_profile.php enforces the same rule again. -->
                     <p class="field-error" id="businessPinError" hidden>
-                        A business listing needs a location. Paste your Google Maps link or the &quot;lat, lng&quot; numbers above.
+                        <?php echo $googleMapsKey !== ''
+                            ? 'A business listing needs a location. Search for your shop or tap the map to drop its pin.'
+                            : 'A business listing needs a location. Paste your Google Maps link or the &quot;lat, lng&quot; numbers above.'; ?>
                     </p>
                 </div>
 
@@ -409,15 +437,26 @@ include __DIR__ . '/../include/head_meta.php';
          this global and rebuilds the barangay list on change. -->
     <script>
         window.ISLAFIND_LOCATIONS = <?php echo json_encode($municipalities, JSON_UNESCAPED_UNICODE); ?>;
-        // Where the BUSINESS "open Google Maps" link lands before
-        // anything is pinned: the chosen municipality's town centre.
-        // Rendered from the same categories.php array as the dropdowns
-        // above, so the client never keeps a second hardcoded copy.
+        // Where the BUSINESS map opens (and the keyless "open Google
+        // Maps" link lands) before anything is pinned: the chosen
+        // municipality's town centre. Rendered from the same
+        // categories.php array as the dropdowns above, so the client
+        // never keeps a second hardcoded copy.
         window.ISLAFIND_CENTERS = <?php echo json_encode($municipalityCenters, JSON_UNESCAPED_UNICODE); ?>;
     </script>
     <!-- Step 3 location logic (municipality cascade + GPS pin +
-         business Google Maps pin) -->
+         business map pin) -->
     <script src="<?php echo asset_url('maps_pinning.js'); ?>"></script>
+
+    <?php if ($googleMapsKey !== ''): ?>
+        <!-- Google Maps JavaScript API. Loaded async, and only when a
+             key is configured; islaInitGmaps (maps_pinning.js) builds
+             the BUSINESS map from the callback. The key is a BROWSER
+             key: restrict it by HTTP referrer and to the Maps
+             JavaScript + Places APIs in Google Cloud. -->
+        <script async
+                src="https://maps.googleapis.com/maps/api/js?key=<?php echo rawurlencode($googleMapsKey); ?>&libraries=places&callback=islaInitGmaps&loading=async&v=weekly"></script>
+    <?php endif; ?>
 
 </body>
 </html>

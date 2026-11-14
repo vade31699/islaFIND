@@ -104,6 +104,15 @@ if ($status === 401 && $provider === 'mailjet' && strpos($lower, 'temporarily bl
         echo "A Mailjet secret is displayed only once: regenerate the pair under\n";
         echo "Account Settings -> API Key Management, copy BOTH values at the same\n";
         echo "moment, and put them in MAIL_API_KEY / MAIL_API_SECRET.\n";
+    } elseif (strpos(trim(env('MAIL_API_KEY', '')), 'xsmtpsib-') === 0) {
+        echo "This is a Brevo SMTP key, not an API key — that is why auth fails.\n";
+        echo "Brevo issues two unrelated key types:\n";
+        echo "  xsmtpsib-...  SMTP relay password, usable only on ports 25/465/587.\n";
+        echo "                The HTTPS API rejects it with \"Key not found\", and this\n";
+        echo "                host blocks those ports, so it cannot be used at all.\n";
+        echo "  xkeysib-...   API v3 key. This is the one MAIL_API_KEY needs.\n";
+        echo "Generate it at app.brevo.com -> Settings -> SMTP & API -> API Keys\n";
+        echo "(the API Keys tab, not the SMTP tab), then replace MAIL_API_KEY.\n";
     } else {
         echo "The API key was rejected. Re-copy it (a Brevo key starts xkeysib-).\n";
     }

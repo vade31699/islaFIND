@@ -10,11 +10,13 @@
 //      permission prompt for the exact GPS fix) and captures the
 //      coordinates into hidden form fields, with a friendly status
 //      message + Google Maps preview link.
-//   3. BUSINESS — a GOOGLE MAPS PIN (REQUIRED): the owner opens Google
-//      Maps in a new tab (centred on the chosen municipality), drops a
-//      pin on the shop, then pastes the link — or the plain "lat, lng"
-//      numbers — back into the form. We parse whichever they paste into
-//      the same hidden fields, and block a submit that has no pin. GPS is the wrong tool here: a shop has ONE fixed
+//   3. BUSINESS — a GOOGLE MAPS PIN (REQUIRED): with a browser API key
+//      (GOOGLE_MAPS_API_KEY) the form embeds an interactive Google Map
+//      centred on the chosen municipality. The owner searches for the
+//      shop, taps the map or drags the pin; the coordinates go into the
+//      same hidden fields and a submit with no pin is blocked. Without a
+//      key the older flow is used: open Google Maps in a new tab, drop a
+//      pin, then paste the link or the "lat, lng" numbers back. GPS is the wrong tool here: a shop has ONE fixed
 //      address, and the person listing it may not even be standing in
 //      it, so a business is NEVER auto-pinned from the owner's current
 //      location.
@@ -103,6 +105,8 @@
             // The "open Google Maps" link DOES follow the municipality,
             // so the owner lands near their shop without retyping it.
             updateGmapsHref();
+            // The embedded map follows it too, while no pin is placed.
+            syncMapToMunicipality();
         });
     }
 
@@ -382,6 +386,7 @@
             if (latInput) { latInput.value = ''; }
             if (lngInput) { lngInput.value = ''; }
             if (pinStatus) { pinStatus.hidden = true; }
+            hideMapPin();
             return;
         }
 
@@ -392,14 +397,226 @@
         }
 
         // 6 decimals (~0.1 m) — the same precision the GPS flow stores.
-        const lat6 = pin.lat.toFixed(6);
-        const lng6 = pin.lng.toFixed(6);
-        if (latInput) { latInput.value = lat6; }   // the form's hidden fields
+        // Reuse the map's own writer, so a pasted pin also moves the
+        // marker when the embedded map is present.
+        setMapPin(pin.lat, pin.lng, true);
+    }
+
+    // --- 5c2. BUSINESS: embedded Google Map (when a key exists) --
+    // The modern replacement for the paste-a-link flow. When
+    // GOOGLE_MAPS_API_KEY is configured, create_profile.php renders
+    // #gmapsMap and loads the Maps JavaScript API with the
+    // islaInitGmaps callback below. Without a key the container does
+    // not exist, every function here is a no-op, and the paste box
+    // keeps working exactly as before.
+    //
+    // The map is only built while a BUSINESS listing is selected: the
+    // whole block is display:none for an INDIVIDUAL listing, and a map
+    // created inside a hidden box would measure 0×0 and render blank.
+
+    const mapEl = document.getElementById('gmapsMap');
+    let gmap = null;            // the google.maps.Map instance
+    let gmarker = null;         // the draggable pin
+    let gmapsReady = false;     // the JS API called us back yet?
+    let gmapsBuilding = false;  // re-entry guard for buildMap()
+
+    // Far enough out to see the barangay, close enough to place a pin
+    // on one shop.
+    const MAP_ZOOM = 15;
+
+    // Where the map should open: the saved/picked pin when there is
+    // one, otherwise the chosen municipality's town centre.
+    function mapCentre() {
+        const lat = latInput ? parseFloat(latInput.value) : NaN;
+        const lng = lngInput ? parseFloat(lngInput.value) : NaN;
+        if (isFinite(lat) && isFinite(lng)
+                && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+            return { lat: lat, lng: lng };
+        }
+        return currentCenter();
+    }
+
+    // Write a coordinate pair from the map into the SAME hidden fields
+    // the GPS and paste flows use, then show the same status line.
+    function setMapPin(lat, lng, moveMap) {
+        const lat6 = Number(lat).toFixed(6);
+        const lng6 = Number(lng).toFixed(6);
+        if (latInput) { latInput.value = lat6; }
         if (lngInput) { lngInput.value = lng6; }
 
-        // Share the GPS flow's status box: same coordinates, same
-        // "View on map" preview link, just a Google Maps label.
         setPinStatus(lat6, lng6, currentPlace(), 'Pinned on Google Maps');
+        if (pinError) { pinError.hidden = true; }
+
+        if (gmarker) {
+            gmarker.setPosition({ lat: Number(lat), lng: Number(lng) });
+            gmarker.setVisible(true);
+        }
+        if (gmap && moveMap) {
+            gmap.panTo({ lat: Number(lat), lng: Number(lng) });
+        }
+    }
+
+    // Remove the marker when the coordinates are cleared (switching
+    // away from an automatic GPS fix, or emptying the paste box).
+    function hideMapPin() {
+        if (gmarker) { gmarker.setVisible(false); }
+    }
+
+    // Build the map, the pin and the place search once. Safe to call
+    // repeatedly; it also shows an existing saved pin in edit mode.
+    function buildMap() {
+        if (!mapEl || gmap || gmapsBuilding) { return; }
+        if (!gmapsReady || !(window.google && google.maps) || !isBusinessType()) { return; }
+
+        gmapsBuilding = true;
+        try {
+            const start = mapCentre();
+            gmap = new google.maps.Map(mapEl, {
+                center: start,
+                zoom: MAP_ZOOM,
+                mapTypeControl: false,
+                streetViewControl: false,
+                fullscreenControl: false,
+                clickableIcons: false,
+            });
+
+            gmarker = new google.maps.Marker({
+                map: gmap,
+                position: start,
+                draggable: true,
+                visible: false,
+                title: 'Your business location',
+            });
+
+            // Tap anywhere on the map to drop (or move) the pin there.
+            gmap.addListener('click', function (e) {
+                setMapPin(e.latLng.lat(), e.latLng.lng(), false);
+            });
+
+            // Dragging the pin updates the stored coordinates.
+            gmarker.addListener('dragend', function () {
+                const p = gmarker.getPosition();
+                if (p) { setMapPin(p.lat(), p.lng(), false); }
+            });
+
+            // A saved pin (edit mode) opens already shown.
+            const lat = latInput ? parseFloat(latInput.value) : NaN;
+            const lng = lngInput ? parseFloat(lngInput.value) : NaN;
+            if (isFinite(lat) && isFinite(lng)) {
+                setMapPin(lat, lng, false);
+            }
+
+            initPlaceSearch();
+        } catch (err) {
+            // A map that fails must never stop the form: the paste
+            // fallback under the map still works.
+            console.error('islaFIND: map failed to start', err);
+        } finally {
+            gmapsBuilding = false;
+        }
+    }
+
+    // Type a business/address, pick a suggestion, and the pin jumps
+    // there. Uses the current PlaceAutocompleteElement when the key has
+    // access to it, and the legacy Autocomplete widget otherwise.
+    function initPlaceSearch() {
+        const wrap = document.getElementById('gmapsSearch');
+        if (!wrap) { return; }
+
+        // With async loading the `places` library can land a moment
+        // after the map callback; importLibrary() waits for it. If
+        // neither path is available the map still pins by tap/drag.
+        if (!google.maps.places && google.maps.importLibrary) {
+            google.maps.importLibrary('places')
+                .then(function () { if (google.maps.places) { addPlaceSearch(wrap); } })
+                .catch(function () {});
+            return;
+        }
+        if (!google.maps.places) { return; }
+        addPlaceSearch(wrap);
+    }
+
+    function addPlaceSearch(wrap) {
+        function usePlace(place) {
+            if (!place) { return; }
+            const loc = place.location || (place.geometry && place.geometry.location);
+            if (!loc) { return; }
+            const lat = typeof loc.lat === 'function' ? loc.lat() : loc.lat;
+            const lng = typeof loc.lng === 'function' ? loc.lng() : loc.lng;
+            if (typeof lat !== 'number' || typeof lng !== 'number') { return; }
+            setMapPin(lat, lng, true);
+            if (gmap) { gmap.setZoom(17); }
+        }
+
+        if (google.maps.places.PlaceAutocompleteElement) {
+            const el = new google.maps.places.PlaceAutocompleteElement();
+            el.placeholder = 'Search your business name or address';
+            wrap.appendChild(el);
+
+            const onPick = function (ev) {
+                const pred = ev.placePrediction
+                    || (ev.detail && ev.detail.placePrediction);
+                if (!pred) { return; }
+                const place = pred.toPlace ? pred.toPlace() : pred;
+                if (place.fetchFields) {
+                    place.fetchFields({ fields: ['location'] })
+                        .then(function () { usePlace(place); })
+                        .catch(function () {});
+                } else {
+                    usePlace(place);
+                }
+            };
+
+            el.addEventListener('gmp-select', onPick);
+            el.addEventListener('gmp-placeselect', onPick);
+            return;
+        }
+
+        if (google.maps.places.Autocomplete) {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'gmaps-search-input';
+            input.placeholder = 'Search your business name or address';
+            input.autocomplete = 'off';
+            wrap.appendChild(input);
+
+            const ac = new google.maps.places.Autocomplete(input, {
+                fields: ['geometry', 'name', 'formatted_address'],
+            });
+            ac.addListener('place_changed', function () {
+                usePlace(ac.getPlace());
+            });
+        }
+    }
+
+    // The Maps JS API calls this once it has loaded (see the script
+    // tag in create_profile.php). Building here — rather than on page
+    // load — keeps an INDIVIDUAL listing from creating a map inside a
+    // hidden box.
+    window.islaInitGmaps = function () {
+        gmapsReady = true;
+        buildMap();
+    };
+
+    // Google calls this when the key is rejected — wrong HTTP referrer,
+    // billing not enabled, or the Maps JavaScript API not enabled on the
+    // project. Open the paste fallback instead of leaving a blank map.
+    window.gm_authFailure = function () {
+        if (!mapEl) { return; }
+        const fallback = document.querySelector('.gmaps-fallback');
+        if (fallback) { fallback.open = true; }
+        showStatus('The map could not load. Paste your Google Maps link instead.');
+    };
+
+    // Keep the map's view in step with the municipality dropdown while
+    // no pin has been placed yet. A pin, once dropped or saved, is
+    // never overwritten by a municipality change.
+    function syncMapToMunicipality() {
+        if (!gmap) { return; }
+        const pinned = (latInput && latInput.value.trim() !== '')
+                    && (lngInput && lngInput.value.trim() !== '');
+        if (pinned) { return; }
+        gmap.setCenter(currentCenter());
     }
 
     // --- 5d. Reveal the capture flow that matches the type -------
@@ -432,10 +649,16 @@
             if (lngInput) { lngInput.value = ''; }
             if (gmapsPaste) { gmapsPaste.value = ''; }
             if (pinStatus) { pinStatus.hidden = true; }
+            hideMapPin();
             gpsCaptured = false;
         }
 
         updateGmapsHref();
+
+        // The map loads asynchronously; buildMap() is a no-op until the
+        // API callback has fired, and the callback builds for a
+        // BUSINESS selection itself.
+        buildMap();
     }
 
     // The profile-type radios drive the switch (profile_script.js
@@ -590,9 +813,10 @@
     }
 
     // --- 9. On load: reveal the matching capture flow ------------
-    // PHP already rendered the right one (Google Maps block for
+    // PHP already rendered the right one (the map/paste block for
     // BUSINESS, GPS button for INDIVIDUAL), but running the same switch
-    // keeps a single code path. It also points the "open Google Maps"
-    // link at the chosen municipality in edit mode.
+    // keeps a single code path. For BUSINESS it also starts the
+    // embedded map (when a key is configured) and points the keyless
+    // "open Google Maps" link at the chosen municipality.
     applyPinFlow();
 })();

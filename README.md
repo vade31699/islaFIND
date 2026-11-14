@@ -107,9 +107,12 @@ hand-written JavaScript files.
 - **Cascading address picker** — municipality → barangay, from one shared list
   of the official Bantayan barangays (including the offshore islets).
 - **Map pin** — individual listings can capture the device GPS with an
-  in-app permission dialog first; business listings paste a Google Maps link or
-  `lat, lng` pair. A business pin is **required** before the listing can save,
-  because the detail modal's route button is built from it.
+  in-app permission dialog first; business listings pin the shop on an
+  **embedded Google Map** (search the business name/address, tap the map or
+  drag the pin), with the older paste-a-link box kept as a fallback when no
+  `GOOGLE_MAPS_API_KEY` is configured. A business pin is **required** before
+  the listing can save, because the detail modal's route button is built
+  from it.
 - **Directions that start from the visitor.** Google's directions deep link only
   falls back to the device location when the browser has already shared one; on
   a desktop that never has, Maps used the destination as the origin (a route
@@ -269,6 +272,7 @@ All secrets live in `.env` (never committed) and are read through `env.php`:
 | `MAIL_DRIVER` `MAIL_API_PROVIDER` | `api` + `mailjet` — codes go out over Mailjet's HTTPS API |
 | `MAIL_API_KEY` `MAIL_API_SECRET` | Mailjet API Key + Secret Key (both required) |
 | `MAIL_FROM` `MAIL_FROM_NAME` | Sender on outgoing mail; must be verified in Mailjet |
+| `GOOGLE_MAPS_API_KEY` | Optional browser key for the embedded business map (`create_profile.php`). Enable Maps JavaScript API + Places API (New) and restrict by HTTP referrer. Empty = the paste-a-link fallback |
 
 Values already present in the process environment always win over `.env`, so a
 host (Docker, CI, production) can override any key without touching the file.
@@ -610,6 +614,7 @@ change — but the names must match the ones the app actually reads:
 | `MAIL_API_PROVIDER` | `mailjet`, `brevo`, `resend` or `sendgrid` — selects the HTTPS payload in `include/mailer.php` |
 | `MAIL_API_KEY` | The provider API key. Never logged. Required when `MAIL_DRIVER=api` |
 | `MAIL_API_SECRET` | Mailjet only: the Secret Key paired with the API Key. Never logged |
+| `GOOGLE_MAPS_API_KEY` | Optional browser key for the embedded business map. Add it in Render (Blueprint prompts for it) and restrict it by HTTP referrer. Leave unset and the paste-a-link fallback is used |
 
 **On a server that ignores `.htaccess`** (nginx), the rules in
 `public/.htaccess` do not apply. Nothing breaks — the app runs without

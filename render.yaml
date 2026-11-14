@@ -84,3 +84,9 @@ services:
         sync: false
       - key: MAIL_FROM_NAME
         value: islaFIND
+
+      # --- Google Maps (BUSINESS pin picker) --------------------
+      # Browser key; restrict it by HTTP referrer in Google Cloud.
+      # Empty/absent = the older paste-a-link pin flow.
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
