@@ -1,7 +1,7 @@
 {
-  "versionCode": 2,
-  "versionName": "1.1.0",
+  "versionCode": 3,
+  "versionName": "1.2.0",
   "apkUrl": "https://islafind.onrender.com/app/islafind-latest.apk",
-  "sha256": "9f0c0bb2b65e4d5e86719d2c1d08f96e7c5aadc2b3356d7a4d278b1429dc4465",
-  "notes": "Adds an in-app update button."
+  "sha256": "0a7a2d81e0e7d3c9f663b6942ea47eea24e8da01223a69bc126238a852b4ce15",
+  "notes": "Business listings now describe what the business offers instead of a unit count, and helper text has been removed across the app."
 }
