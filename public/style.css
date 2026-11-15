@@ -518,26 +518,6 @@ body {
     display: none;
 }
 
-/* The one-line success hint that replaces the checklist */
-.rule-hint {
-    margin: 10px 0 0 0;       /* Same gap as the checklist */
-    font-size: 12px;
-    font-weight: bold;
-    color: #1d7a44;           /* Dark green to signal success */
-    animation: hint-in 0.3s ease; /* Gentle fade-in when it appears */
-}
-
-@keyframes hint-in {
-    from {
-        opacity: 0;
-        transform: translateY(-2px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
 .rule-item {
     display: inline-flex;     /* Pill sits inline in the wrap row */
     align-items: center;
@@ -2797,15 +2777,6 @@ body {
     transform: translateY(0);
 }
 
-/* Subtle "tap for details" affordance at the card footer */
-.feed-card-hint {
-    display: block;
-    margin-top: 10px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--primary);
-}
-
 .feed-card-top {
     display: flex;
     gap: 12px;
@@ -2957,7 +2928,7 @@ body {
     flex-shrink: 0;
 }
 
-/* Description snippet on INDIVIDUAL SKILLS cards (feed + directory) */
+/* Description snippet on cards (feed + directory, both profile types) */
 .card-desc {
     margin: 8px 0 0 0;
     font-size: 13px;
@@ -2967,29 +2938,6 @@ body {
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
-}
-
-/* Available-units badge on BUSINESS cards */
-.card-units {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 8px 0 0 0;
-    padding: 5px 10px;
-    background: #fff8ec;
-    border: 1px solid #f0dfc0;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #8a5a00;
-    width: fit-content;
-}
-
-.card-units svg {
-    width: 14px;
-    height: 14px;
-    color: #b07600;
-    flex-shrink: 0;
 }
 
 /* Municipality + barangay badge on BUSINESS directory cards */
@@ -3088,30 +3036,6 @@ body {
     width: 100%;
 }
 
-/* Account-sync notice on the streamlined profile form */
-.sync-notice {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 4px 0 14px 0;
-    padding: 10px 12px;
-    background: var(--primary-soft);
-    border: 1px solid #d3ecdd;
-    border-radius: 10px;
-    font-size: 12px;
-    line-height: 1.45;
-    color: #1d7a44;
-    text-align: left;
-}
-
-.sync-notice svg {
-    flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    margin-top: 1px;
-    color: var(--primary);
-}
-
 /* ---------- Location step (municipality cascade + GPS pin) ------ */
 
 /* GPS pin button: outline style so it reads as a secondary action
@@ -3171,16 +3095,6 @@ body {
 }
 
 /* ---------- BUSINESS Google Maps pin (create_profile.php) ------ */
-
-/* Instruction line under the pin block ("Open Google Maps..."),
-   matching the muted hint style used elsewhere. */
-.map-picker-hint {
-    margin: 8px 0 0 0;
-    font-size: 12px;
-    line-height: 1.5;
-    color: #888888;
-    text-align: left;
-}
 
 /* Embedded business map (create_profile.php): a place search box, the
    map itself, and a collapsed paste fallback for a key-less setup. */
@@ -3632,7 +3546,7 @@ body {
 }
 
 /* Soft reveal for fields that appear after a profile-type switch
-   (search bar, business name, description / units — see showField()
+   (search bar, business name — see showField()
    in profile_script.js). display:none can't be transitioned, so a
    freshly shown field plays this short fade+slide instead. */
 @keyframes fieldReveal {
@@ -4082,8 +3996,8 @@ body {
     display: none;
 }
 
-/* Contextual block inside the detail modal: the full description
-   (individual) or the unit-count row (business). */
+/* Contextual block inside the detail modal: the listing's full
+   description (both profile types). */
 .pm-context {
     display: flex;
     align-items: flex-start;

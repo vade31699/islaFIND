@@ -46,7 +46,6 @@
     const pinStatusText = document.getElementById('pinStatusText');   // status message span
     const gpsModal  = document.getElementById('gpsPermissionModal'); // in-app GPS permission dialog
     const gpsGroup  = document.getElementById('gpsPinGroup');        // GPS button wrapper (INDIVIDUAL)
-    const gpsHint   = document.getElementById('gpsPinHint');         // "pasting a map pin is business-only" note
     const gmapsGroup = document.getElementById('gmapsPinGroup');      // Google Maps pin block (BUSINESS)
     const openGmapsBtn = document.getElementById('openGmapsBtn');     // "open Google Maps" link
     const gmapsPaste = document.getElementById('gmapsPaste');         // paste-back input
@@ -120,19 +119,6 @@
         pinStatus.hidden = false;   // reveal the mint-green status box
     }
 
-    // The individual GPS note ("pasting a Google Maps pin is a
-    // business-only option...") is only worth reading while no fix
-    // exists, so it hides as soon as coordinates are in the hidden
-    // fields — after a GPS capture, and on load for an edit that
-    // already carries a pin. It comes back if a type switch clears
-    // the coordinates again.
-    function syncGpsHint() {
-        if (!gpsHint) { return; }
-        const pinned = (latInput && latInput.value.trim() !== '')
-                    && (lngInput && lngInput.value.trim() !== '');
-        gpsHint.hidden = pinned;
-    }
-
     // Put the pin button back to its idle state after a GPS request
     // finishes (success OR error) so the user can pin again.
     function resetPinButton() {
@@ -163,10 +149,6 @@
         // from GPS, so switching to BUSINESS can discard them instead
         // of treating the owner's current location as the shop's pin.
         gpsCaptured = true;
-
-        // The pin is captured, so the "you may skip this" note has
-        // done its job — take it away.
-        syncGpsHint();
 
         // Show the captured spot immediately (with whatever
         // municipality/barangay is currently picked), then enrich it
@@ -631,11 +613,6 @@
         // Maps, individuals get the GPS button.
         if (gpsGroup)   { gpsGroup.style.display   = business ? 'none' : ''; }
         if (gmapsGroup) { gmapsGroup.style.display = business ? '' : 'none'; }
-
-        // Keep the individual note in step with whatever is pinned
-        // right now (covers load, and a type switch that cleared the
-        // GPS fix on the way to BUSINESS).
-        syncGpsHint();
 
         if (!business) { return; }
 

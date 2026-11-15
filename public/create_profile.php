@@ -88,7 +88,6 @@ $oldInput = [
     'longitude'           => $provider['longitude']     ?? '',
     'name'                => $provider['name']          ?? '',   // business only
     'profile_description' => $provider['profile_description'] ?? '',
-    'unit_inventory'      => $provider ? (string) $provider['unit_inventory'] : '',
 ];
 
 if (isset($_SESSION['profile_flash'])) {
@@ -273,13 +272,6 @@ include __DIR__ . '/../include/head_meta.php';
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                         Pin My Current Location
                     </button>
-                    <!-- Reminder: the HAND-PASTED Google Maps pin is a
-                         BUSINESS-only option, so an individual listing
-                         never gets that box — its pin comes from the
-                         device GPS (and may be skipped). maps_pinning.js
-                         hides this line once a fix is captured; it is
-                         already hidden here when an edit loads a pin. -->
-                    <p class="map-picker-hint" id="gpsPinHint"<?php echo (($oldInput['latitude'] ?? '') !== '' && ($oldInput['longitude'] ?? '') !== '') ? ' hidden' : ''; ?>>Your pin comes from your device&rsquo;s GPS. Pasting a Google Maps pin by hand is a business-listing option only, so it is not offered here. You can also skip the pin and still save your listing.</p>
                 </div>
 
                 <!-- BUSINESS ONLY: pin the shop on a map. With
@@ -288,7 +280,7 @@ include __DIR__ . '/../include/head_meta.php';
                      business name, tap the map or drag the pin. Without a
                      key, the older link + paste box is rendered instead,
                      so a checkout with no key still works. An INDIVIDUAL
-                     listing never gets this block — see the GPS hint. -->
+                     listing never gets this block. -->
                 <div class="form-group" id="gmapsPinGroup"
                      style="<?php echo $oldInput['profile_type'] === 'business' ? '' : 'display:none'; ?>">
                     <?php if ($googleMapsKey !== ''): ?>
@@ -296,7 +288,6 @@ include __DIR__ . '/../include/head_meta.php';
                         <div class="gmaps-search" id="gmapsSearch"></div>
                         <div class="gmaps-map" id="gmapsMap"
                              role="application" aria-label="Business location map"></div>
-                        <p class="map-picker-hint">Search your business name or address, then drag the pin (or tap the map) to set the exact spot.</p>
                         <details class="gmaps-fallback">
                             <summary>Or paste a Google Maps link</summary>
                             <input type="text" id="gmapsPaste" autocomplete="off"
@@ -352,56 +343,33 @@ include __DIR__ . '/../include/head_meta.php';
                     </div>
                 </div>
 
-                <!-- ============ CONTEXTUAL FIELD ============
-                     The profile type decides which field is shown:
-                     - INDIVIDUAL SKILLS -> a free-text description
-                       (experience, rates, job specifics)
-                     - BUSINESS -> an available-units count (rooms,
-                       motorbikes, beds, hardware stock, ...)
-                     The JS toggles the two below instantly when the
-                     user switches the type card, no reload needed. -->
+                <!-- ============ DESCRIPTION ============
+                     Both profile types describe themselves in words:
+                     - INDIVIDUAL SKILLS -> experience, rates, the job
+                     - BUSINESS -> what the shop offers, hours, what a
+                       customer should know before visiting
+                     It is ONE textarea for both, so the saved column is
+                     always profile_description. Only its label and
+                     placeholder change with the chosen type (the JS
+                     below updates both instantly, no reload needed). -->
 
-                <!-- Description (INDIVIDUAL SKILLS) -->
                 <?php if (isset($errors['profile_description'])): ?>
                     <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['profile_description']); ?></p>
                 <?php endif; ?>
-                <div class="form-group contextual-field" id="descriptionGroup"
-                     data-context="individual"
-                     style="<?php echo $oldInput['profile_type'] === 'individual' ? '' : 'display:none'; ?>">
-                    <label class="field-label" for="profileDescription">About your service</label>
+                <div class="form-group" id="descriptionGroup">
+                    <label class="field-label" for="profileDescription" id="descriptionLabel"><?php echo $oldInput['profile_type'] === 'business' ? 'About your business' : 'About your service'; ?></label>
                     <div class="input-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
-                        <textarea name="profile_description" id="profileDescription" rows="3" maxlength="1000"
-                                  placeholder="Tell clients about your experience, rates and what the job involves…"
-                                  aria-label="About your service"><?php echo htmlspecialchars($oldInput['profile_description'] ?? ''); ?></textarea>
+                        <textarea name="profile_description" id="profileDescription" rows="4"
+                                  maxlength="<?php echo $oldInput['profile_type'] === 'business' ? '150' : '1000'; ?>"
+                                  minlength="<?php echo $oldInput['profile_type'] === 'business' ? '50' : ''; ?>"
+                                  data-max-individual="1000" data-max-business="150"
+                                  data-min-individual="" data-min-business="50"
+                                  placeholder="<?php echo $oldInput['profile_type'] === 'business' ? 'Describe your business — what you offer, your hours and what customers should know…' : 'Tell clients about your experience, rates and what the job involves…'; ?>"
+                                  data-ph-individual="Tell clients about your experience, rates and what the job involves…"
+                                  data-ph-business="Describe your business — what you offer, your hours and what customers should know…"
+                                  aria-label="<?php echo $oldInput['profile_type'] === 'business' ? 'About your business' : 'About your service'; ?>"><?php echo htmlspecialchars($oldInput['profile_description'] ?? ''); ?></textarea>
                     </div>
-                </div>
-
-                <!-- Unit inventory (BUSINESS) -->
-                <?php if (isset($errors['unit_inventory'])): ?>
-                    <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['unit_inventory']); ?></p>
-                <?php endif; ?>
-                <div class="form-group contextual-field" id="unitGroup"
-                     data-context="business"
-                     style="<?php echo $oldInput['profile_type'] === 'business' ? '' : 'display:none'; ?>">
-                    <label class="field-label" for="unitInventory">Units available</label>
-                    <div class="input-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-                        <input type="number" name="unit_inventory" id="unitInventory" min="0" max="999999"
-                               placeholder="e.g. 12 rooms, 8 motorbikes, 20 beds"
-                               value="<?php echo htmlspecialchars($oldInput['unit_inventory'] ?? ''); ?>"
-                               aria-label="Units available">
-                    </div>
-                </div>
-
-                <!-- Account sync notice: what the card will inherit -->
-                <div class="sync-notice">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                    <span id="syncNoticeText">
-                        <?php echo $oldInput['profile_type'] === 'business'
-                            ? 'Your contact number will be shown on this listing, and it starts with your account photo until you give it one of its own — add pictures any time from Settings, on this profile&rsquo;s card.'
-                            : 'Your name, photo and contact number from your account will be shown on this listing. You can give this profile a picture of its own any time, from Settings.'; ?>
-                    </span>
                 </div>
 
                 <button type="submit" class="btn btn-isla" data-loading-label="Saving…">

@@ -105,23 +105,11 @@ function feedCardHtml(array $p, array $categories, int $myId, string $csrf, arra
     // provider decides when (and whether) to share their number
     // inside the messenger conversation — never on a public feed.
 
-    // CONTEXTUAL FIELD: the profile type decides what extra detail
-    // the card shows.
-    //   - INDIVIDUAL SKILLS -> a short description snippet (the
-    //     full text lives in the detail modal).
-    //   - BUSINESS -> an "N units available" badge (rooms, bikes...).
+    // CONTEXTUAL FIELD: both profile types show a short description
+    // snippet here (the full text lives in the detail modal).
     $isBusiness = $p['profile_type'] === 'business';
     $desc       = trim((string) ($p['profile_description'] ?? ''));
-    $hasUnits   = isset($p['unit_inventory']) && $p['unit_inventory'] !== null;
-    $units      = $hasUnits ? (int) $p['unit_inventory'] : 0;
-    if ($isBusiness && $hasUnits) {
-        // Only render the badge when the owner actually set a count
-        // (a business that never entered units shows nothing).
-        $contextBlock = '<div class="card-units">'
-            . '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>'
-            . '<span>' . $units . ' unit' . ($units === 1 ? '' : 's') . ' available</span>'
-            . '</div>';
-    } elseif ($desc !== '') {
+    if ($desc !== '') {
         $snippet = function_exists('mb_substr')
             ? (mb_strlen($desc) > 110 ? mb_substr($desc, 0, 110) . '…' : $desc)
             : (strlen($desc) > 110 ? substr($desc, 0, 110) . '…' : $desc);
@@ -169,7 +157,7 @@ function feedCardHtml(array $p, array $categories, int $myId, string $csrf, arra
 
     // The feed card is COMPACT by design: it shows only the profile
     // details (photo, name, badge, jobs, rating, phone, and the
-    // contextual description / units). Every action — including the
+    // contextual description). Every action — including the
     // "Get Route" link for a pinned business — lives in the detail
     // modal that opens when the card is tapped. All the detail fields
     // are carried as data attributes so the modal can be filled
@@ -237,7 +225,6 @@ function feedCardHtml(array $p, array $categories, int $myId, string $csrf, arra
         // simply means "no extra photos".
         . ' data-album="' . $albumAttr . '"'
         . ' data-desc="' . htmlspecialchars($desc) . '"'
-        . ' data-units="' . ($isBusiness && $hasUnits ? (int) $units : '') . '"'
         . ' data-map-lat="' . ($hasPin ? htmlspecialchars((string) $mapLat) : '') . '"'
         . ' data-map-lng="' . ($hasPin ? htmlspecialchars((string) $mapLng) : '') . '"'
         // The search ranking's coordinates: present on every pinned
@@ -259,7 +246,6 @@ function feedCardHtml(array $p, array $categories, int $myId, string $csrf, arra
         . $ratingRow
         . $locChip
         . $contextBlock
-        . '<span class="feed-card-hint">Tap for details &#8250;</span>'
         . '</div>';
     return $html;
 }

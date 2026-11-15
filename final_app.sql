@@ -140,11 +140,14 @@ CREATE TABLE IF NOT EXISTS user_devices (
 --                   that really needs it: the shop front, the rooms
 --                   and the stock are what a client is deciding on.
 --                   Extra photos live in provider_album_images.
--- profile_description: free-text blurb for INDIVIDUAL SKILLS
---                      listings (experience, rates, job details).
--- unit_inventory     : available-unit count for BUSINESS listings
---                      (rooms, motorbikes, beds, stock, etc.).
--- Only ONE of the two is filled, depending on profile_type.
+-- profile_description: free-text blurb for BOTH profile types —
+--                      a service description (experience, rates,
+--                      job details) or a business description
+--                      (what the shop offers, hours, etc.).
+-- unit_inventory     : retired. BUSINESS listings describe the
+--                      business instead of counting units; the
+--                      column is kept for existing rows and is
+--                      written as NULL by save_profile.php.
 -- average_rating + review_count: aggregate metrics kept in sync
 -- with the reviews table by rate_service.php so profile cards
 -- always reflect the latest earned ratings.

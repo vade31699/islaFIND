@@ -88,7 +88,6 @@ $oldInput = [
     'longitude'           => trim($_POST['longitude'] ?? ''),   // GPS pin (optional)
     'name'                => trim($_POST['name']      ?? ''),   // business only
     'profile_description' => trim($_POST['profile_description'] ?? ''),
-    'unit_inventory'      => trim($_POST['unit_inventory'] ?? ''),
 ];
 $errors = [];
 
@@ -154,36 +153,30 @@ if ($oldInput['profile_type'] === 'business') {
     }
 }
 
-// (e) Contextual field: each profile type carries its OWN field.
-//     - INDIVIDUAL SKILLS stores a free-text description.
-//     - BUSINESS stores an available-units count.
-//     The field for the OTHER type is ignored (and cleared on save).
-if ($oldInput['profile_type'] === 'individual') {
-    if ($oldInput['profile_description'] === '') {
-        $errors['profile_description'] = 'Please tell clients about your service.';
-    } elseif (($descProblem = isla_text_problem($oldInput['profile_description'], 1000, 'Description')) !== null) {
-        // Shared length + markup rule (see security.php). Escaping
-        // already makes the description safe to display — refusing
-        // markup here means a tag like <script>alert('XSS')</script>
-        // is never stored or listed at all. Plain text such as
-        // "units < 2 tons" still passes, because contains_html_tag()
-        // only matches a "<" followed by a letter, "/" or "!".
-        $errors['profile_description'] = $descProblem;
-    }
-} else {
-    // BUSINESS: the unit count must be a non-negative whole number.
-    // isla_is_digits() is what enforces "numbers only": letters, a
-    // minus sign and a decimal point are all refused, so "12 rooms" or
-    // "5.5" cannot be stored in an integer column. The wording names
-    // the problem because "must be a number" is more actionable than
-    // a silent cast of "12abc" to 12.
-    if ($oldInput['unit_inventory'] === '') {
-        $errors['unit_inventory'] = 'Please enter how many units are available.';
-    } elseif (!isla_is_digits($oldInput['unit_inventory'])) {
-        $errors['unit_inventory'] = 'Units available must be a whole number — numbers only, no letters.';
-    } elseif ((int) $oldInput['unit_inventory'] > 999999) {
-        $errors['unit_inventory'] = 'Units available is too large.';
-    }
+// (e) Description: BOTH profile types describe themselves in words,
+//     so the same field (and the same column) serves both. A business
+//     is asked what it offers, not how many units it has.
+//     A BUSINESS description is mandatory and must be 50–150
+//     characters: long enough to say what the business offers, short
+//     enough to stay readable on a card. INDIVIDUAL SKILLS keep their
+//     longer 1000-character limit.
+$descMax = $isBusiness ? 150 : 1000;
+$descMin = $isBusiness ? 50 : 0;
+if ($oldInput['profile_description'] === '') {
+    $errors['profile_description'] = $isBusiness
+        ? 'Please describe your business so customers know what you offer.'
+        : 'Please tell clients about your service.';
+} elseif ($descMin > 0 && mb_strlen($oldInput['profile_description']) < $descMin) {
+    $errors['profile_description'] = 'Your business description needs at least '
+        . $descMin . ' characters — tell customers what you offer or sell.';
+} elseif (($descProblem = isla_text_problem($oldInput['profile_description'], $descMax, 'Description')) !== null) {
+    // Shared length + markup rule (see security.php). Escaping
+    // already makes the description safe to display — refusing
+    // markup here means a tag like <script>alert('XSS')</script>
+    // is never stored or listed at all. Plain text such as
+    // "units < 2 tons" still passes, because contains_html_tag()
+    // only matches a "<" followed by a letter, "/" or "!".
+    $errors['profile_description'] = $descProblem;
 }
 
 // --- 8. Validation failed? Return to the form with errors ------
@@ -194,16 +187,15 @@ if (!empty($errors)) {
 }
 
 // --- 9. Insert OR update the profile (PDO prepared statements) -
-// The contextual field is stored in the column that matches the
-// profile type: profile_description for INDIVIDUAL SKILLS, and
-// unit_inventory for BUSINESS. The OTHER column is always cleared
-// to NULL so a listing never carries a stale field from a type
-// switch. For INDIVIDUAL listings the name stays NULL — cards fall
-// back to the account holder's full name. All values are bound as
-// parameters, so user input can never be interpreted as SQL.
+// The description is stored in profile_description for BOTH types.
+// unit_inventory is a retired BUSINESS field — it is written as NULL
+// so a listing created before this change never shows a stale unit
+// count again. For INDIVIDUAL listings the name stays NULL — cards
+// fall back to the account holder's full name. All values are bound
+// as parameters, so user input can never be interpreted as SQL.
 // ($isBusiness was resolved during validation above.)
-$description = $isBusiness ? null : ($oldInput['profile_description'] !== '' ? $oldInput['profile_description'] : null);
-$units       = $isBusiness ? (int) $oldInput['unit_inventory'] : null;
+$description = $oldInput['profile_description'] !== '' ? $oldInput['profile_description'] : null;
+$units       = null;
 
 // (9b) Resolve the location columns. Coordinates are stored as-is
 // (NULL when an INDIVIDUAL listing skipped the pin — a BUSINESS one

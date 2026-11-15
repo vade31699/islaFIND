@@ -20,11 +20,10 @@
     const optionLists   = document.querySelectorAll('.subcat-options'); // dropdown option lists
     const titleInput    = document.getElementById('titleInput');   // hidden final value
     const bizNameGroup  = document.getElementById('businessNameGroup'); // business name field
-    const syncNotice    = document.getElementById('syncNoticeText');    // account-sync hint
-    // Contextual fields: the INDIVIDUAL description and the BUSINESS
-    // unit inventory. Exactly one is visible at a time, matching the
-    // active profile type (see create_profile.php markup).
-    const contextFields = document.querySelectorAll('.contextual-field');
+    // The description field is shared by both profile types: only its
+    // label and placeholder change with the type (see the markup).
+    const descLabel     = document.getElementById('descriptionLabel');
+    const descInput     = document.getElementById('profileDescription');
 
     // --- 2. Helper: which profile type is currently selected? -------
     function activeType() {
@@ -47,25 +46,30 @@
     }
 
     // --- 3. (cont.) Helper: apply the type-dependent UI -------------
-    // Shows the business name field only for BUSINESS and rewrites
-    // the sync notice so it always describes what will be inherited.
-    // Also reveals the matching contextual field (description for
-    // INDIVIDUAL SKILLS, unit inventory for BUSINESS) and hides the
-    // other one — all with a quick reveal, no page reload.
+    // Shows the business name field only for BUSINESS, and retitles the
+    // shared description field so a BUSINESS is asked about the business
+    // and an INDIVIDUAL about their service.
     function applyType(type) {
         showField(bizNameGroup, type === 'business');
-        if (syncNotice) {
-            // Same wording create_profile.php renders, so the hint never
-            // contradicts the field set actually on screen. A business
-            // listing may be given its own picture (and a photo album)
-            // after it is created, so the notice points at Settings.
-            syncNotice.textContent = type === 'business'
-                ? 'Your contact number will be shown on this listing, and it starts with your account photo until you give it one of its own. Add pictures any time from Settings, on the card for this profile.'
-                : 'Your name, photo and contact number from your account will be shown on this listing. You can give this profile a picture of its own any time, from Settings.';
+        if (descLabel) {
+            descLabel.textContent = type === 'business' ? 'About your business' : 'About your service';
         }
-        contextFields.forEach(function (field) {
-            showField(field, field.dataset.context === type);
-        });
+        if (descInput) {
+            descInput.placeholder = type === 'business'
+                ? descInput.dataset.phBusiness
+                : descInput.dataset.phIndividual;
+            // A BUSINESS description is 50–150 characters; an
+            // INDIVIDUAL one keeps the longer limit. The same range is
+            // enforced server-side in save_profile.php.
+            const max = type === 'business' ? descInput.dataset.maxBusiness : descInput.dataset.maxIndividual;
+            const min = type === 'business' ? descInput.dataset.minBusiness : descInput.dataset.minIndividual;
+            if (max) { descInput.maxLength = parseInt(max, 10); }
+            if (min) {
+                descInput.minLength = parseInt(min, 10);
+            } else {
+                descInput.removeAttribute('minlength');
+            }
+        }
     }
 
     // --- 4. Helper: filter one dropdown by its search text -----------
@@ -113,7 +117,7 @@
             }
         });
 
-        // Business name field + notice + contextual field follow the type.
+        // Business name field + description follow the type.
         applyType(type);
     }
 

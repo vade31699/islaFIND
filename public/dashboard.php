@@ -1549,15 +1549,9 @@ include __DIR__ . '/../include/head_meta.php';
                                             <?php echo $provPhone; ?>
                                         </p>
                                     <?php endif; ?>
-                                    <!-- Contextual field: description
-                                         (individual) or unit count
-                                         (business) -->
-                                    <?php if ($myProvider['profile_type'] === 'business' && $myProvider['unit_inventory'] !== null): ?>
-                                        <div class="card-units">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-                                            <span><?php echo (int) $myProvider['unit_inventory']; ?> unit<?php echo (int) $myProvider['unit_inventory'] === 1 ? '' : 's'; ?> available</span>
-                                        </div>
-                                    <?php elseif (($myProvider['profile_description'] ?? '') !== ''): ?>
+                                    <!-- Contextual field: the listing's own
+                                         description (both profile types) -->
+                                    <?php if (($myProvider['profile_description'] ?? '') !== ''): ?>
                                         <?php $d = $myProvider['profile_description']; $snip = function_exists('mb_substr') ? (mb_strlen($d) > 110 ? mb_substr($d, 0, 110) . '…' : $d) : (strlen($d) > 110 ? substr($d, 0, 110) . '…' : $d); ?>
                                         <p class="card-desc"><?php echo htmlspecialchars($snip); ?></p>
                                     <?php endif; ?>
@@ -1943,7 +1937,7 @@ include __DIR__ . '/../include/head_meta.php';
                         <?php endif; ?>
 
                         <?php if (!$myContracts): ?>
-                            <p class="sec-hint">Nothing here yet — when someone inquires about one of your listings, it appears here so you can track it. Individual skills jobs can be completed to unlock a rating; business bookings are tracked to completion too.</p>
+                            <p class="sec-hint">Nothing here yet — when someone inquires about one of your listings, it appears here.</p>
                         <?php else: ?>
                             <ul class="inquiry-list">
                                 <?php foreach ($myContracts as $job): ?>
@@ -2298,9 +2292,8 @@ include __DIR__ . '/../include/head_meta.php';
                  picture uses, so there is only one viewer in the app. -->
             <div class="pm-gallery" id="pmGallery" hidden></div>
             <div class="pm-rating" id="pmRating"></div>
-            <!-- Contextual detail: the worker's full description or
-                 the business's available-unit count (hidden when the
-                 listing has neither). -->
+            <!-- Contextual detail: the listing's full description,
+                 for both profile types (hidden when it has none). -->
             <div class="pm-context" id="pmContext" hidden></div>
             <ul class="pm-details">
                 <li id="pmBarangay"></li>
@@ -2391,9 +2384,6 @@ include __DIR__ . '/../include/head_meta.php';
                     <label class="field-label" for="rmDetails">Tell us more <span class="field-counter">(optional)</span></label>
                     <textarea class="field-in" id="rmDetails" name="details" rows="3" maxlength="2000"
                               placeholder="Anything that helps an admin understand the problem."></textarea>
-                    <p class="sec-hint" id="rmOtherHint" hidden>
-                        You picked “Something else” — please describe it.
-                    </p>
                 </div>
 
                 <div class="form-group">
@@ -2826,7 +2816,6 @@ include __DIR__ . '/../include/head_meta.php';
         const rmProviderId = document.getElementById('rmProviderId');
         const rmReturnTo  = document.getElementById('rmReturnTo');
         const rmReason    = document.getElementById('rmReason');
-        const rmOtherHint = document.getElementById('rmOtherHint');
         const rmCategory  = document.getElementById('rmCategory');
 
         pmReportBtn.addEventListener('click', function () {
@@ -2844,7 +2833,6 @@ include __DIR__ . '/../include/head_meta.php';
             // server rejects as "Which listing?"). The order is the whole
             // trick here.
             reportModal.querySelector('form').reset();
-            rmOtherHint.hidden = true;
 
             // Now the per-listing details, then SWAP modals: the detail
             // modal closes first so the two are never stacked, which is
@@ -2866,13 +2854,6 @@ include __DIR__ . '/../include/head_meta.php';
 
             providerModal.hidden = true;
             openModal(reportModal);
-        });
-
-        // "Something else" needs a description, so ask for one as soon as
-        // it is chosen. report_listing.php enforces this on the server;
-        // this is only the earlier, friendlier warning.
-        rmReason.addEventListener('change', function () {
-            rmOtherHint.hidden = rmReason.value !== 'other';
         });
 
         // ---- Distance + travel time to a pinned business ----------
@@ -3155,16 +3136,11 @@ include __DIR__ . '/../include/head_meta.php';
                     + '<span>' + escHtml(place) + '</span>'
                 : '';
 
-            // Contextual detail: description (individual) or unit
-            // count (business). Hidden when the listing has neither.
+            // Contextual detail: the listing's description, for both
+            // INDIVIDUAL SKILLS and BUSINESS. Hidden when it is empty.
             const ctx = document.getElementById('pmContext');
             const desc = (card.dataset.desc || '').trim();
-            const units = card.dataset.units;
-            if (card.dataset.type === 'business' && units !== '') {
-                ctx.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>'
-                    + '<span>' + escHtml(units) + ' unit' + (units === '1' ? '' : 's') + ' available</span>';
-                ctx.hidden = false;
-            } else if (desc) {
+            if (desc) {
                 ctx.innerHTML = '<p>' + escHtml(desc) + '</p>';
                 ctx.hidden = false;
             } else {

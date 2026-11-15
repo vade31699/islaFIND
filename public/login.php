@@ -1379,7 +1379,6 @@ include __DIR__ . '/../include/head_meta.php';
                                     <li class="rule-item" data-rule="lower"><span class="rule-check"></span>a-z</li>
                                     <li class="rule-item" data-rule="special"><span class="rule-check"></span>! @ -</li>
                                 </ul>
-                                <p class="rule-hint" id="ruleHint" hidden>&#10003; All requirements met</p>
 
                                 <?php if (isset($errors['password'])): ?>
                                     <p class="field-error" role="alert"><?php echo htmlspecialchars($errors['password']); ?></p>
@@ -1562,8 +1561,6 @@ include __DIR__ . '/../include/head_meta.php';
                                     <strong><?php echo htmlspecialchars($_SESSION['pending_reset']['code']); ?></strong></div>
                             <?php endif; ?>
 
-                            <p class="sec-hint" style="margin:0 0 14px 0;text-align:center;">We emailed a 6-digit reset code to your account. Enter it to continue.</p>
-
                             <form action="login.php" method="POST" novalidate>
                                 <input type="hidden" name="mode" value="reset">
                                 <input type="hidden" name="reset_step" value="1">
@@ -1594,8 +1591,6 @@ include __DIR__ . '/../include/head_meta.php';
                             <?php if (isset($errors['form']) && $initialPanel === 'reset' && $resetVerified): ?>
                                 <div class="alert alert-error" role="alert"><?php echo htmlspecialchars($errors['form']); ?></div>
                             <?php endif; ?>
-
-                            <p class="sec-hint" style="margin:0 0 14px 0;text-align:center;">Code verified! Now choose your new password.</p>
 
                             <form action="login.php" method="POST" novalidate>
                                 <input type="hidden" name="mode" value="reset">
@@ -1842,7 +1837,6 @@ include __DIR__ . '/../include/head_meta.php';
         const strengthLabel    = document.getElementById('strengthLabel');
         const strengthLabels   = ['', 'Weak', 'Fair', 'Good', 'Strong'];
         const ruleList = document.getElementById('ruleList');
-        const ruleHint = document.getElementById('ruleHint');
         const ruleItems = {
             length:  document.querySelector('.rule-item[data-rule="length"]'),
             upper:   document.querySelector('.rule-item[data-rule="upper"]'),
@@ -1869,7 +1863,6 @@ include __DIR__ . '/../include/head_meta.php';
             }
             const allMet = score === 4;
             ruleList.hidden = allMet;
-            ruleHint.hidden = !allMet;
             syncTrackHeight();   // checklist collapse changes the panel height
         }
         registerPassword.addEventListener('input', updateStrength);
